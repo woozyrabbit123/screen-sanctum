@@ -178,12 +178,15 @@ class MainWindow(QMainWindow):
 
                 # Update UI
                 self.image_canvas.set_image(self.qimage)
-                self.image_canvas.set_regions(self.regions)
-                self.sidebar.set_regions(self.regions)
 
-                # Auto-detect if Pro and enabled
+                # Run auto-detection if pro and enabled
                 if self.is_pro and self.config.auto_detect_on_open:
-                    self._run_auto_detection()
+                    self._run_detection()
+                else:
+                    # No detection - clear regions
+                    self.regions = []
+                    self.image_canvas.set_regions(self.regions)
+                    self.sidebar.set_regions(self.regions)
 
                 self.statusBar().showMessage("Image pasted from clipboard", 2000)
 
