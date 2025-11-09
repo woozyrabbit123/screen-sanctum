@@ -8,6 +8,8 @@ Workers) access config.json simultaneously.
 import sqlite3
 import json
 import threading
+import os
+from dataclasses import asdict
 from pathlib import Path
 from typing import List
 import platformdirs
@@ -118,42 +120,56 @@ def _deserialize_template(data: dict) -> RedactionTemplate:
 def init_db() -> None:
     """Initialize the configuration database.
 
-    Creates the config table if it doesn't exist and inserts a default
-    AppConfig if the table is empty. This is safe to call multiple times.
+    Creates the config table if it doesn't exist. If the database is empty,
+    attempts to migrate data from legacy config.json file. If migration fails
+    or no legacy file exists, creates a default config. This is safe to call
+    multiple times.
     """
+    # 1. Define paths
+    config_dir = platformdirs.user_config_dir("ScreenSanctum", ensure_exists=True)
+    db_path = os.path.join(config_dir, "config.sqlite")
+    legacy_json_path = os.path.join(config_dir, "config.json")
+
     with db_lock:
-        conn = sqlite3.connect(str(DATABASE_PATH))
-        cursor = conn.cursor()
+        db = sqlite3.connect(db_path)
+        db.execute("CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY, config_json TEXT)")
 
-        # Create table if not exists
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS config (
-                id INTEGER PRIMARY KEY,
-                config_json TEXT NOT NULL
-            )
-        """)
+        # 2. Check if DB is empty
+        cursor = db.execute("SELECT config_json FROM config WHERE id = 1")
+        existing_config = cursor.fetchone()
 
-        # Check if table is empty
-        cursor.execute("SELECT COUNT(*) FROM config")
-        count = cursor.fetchone()[0]
+        if existing_config is None:
+            # DB is new. Check for a legacy JSON file to migrate.
+            if os.path.exists(legacy_json_path):
+                try:
+                    with open(legacy_json_path, 'r') as f:
+                        legacy_json_data = f.read()
+                    # We just insert the raw JSON data.
+                    # Deserialization and validation happens in load_config()
+                    db.execute("INSERT INTO config (id, config_json) VALUES (1, ?)", (legacy_json_data,))
+                    db.commit()
+                    # Delete the old file *after* successful migration
+                    os.remove(legacy_json_path)
+                except Exception as e:
+                    # If migration fails, create a default config
+                    default_config = AppConfig()
+                    default_config.templates = _create_default_templates()
+                    default_config.active_template_id = "tpl_01_default"
+                    default_config_dict = _serialize_config(default_config)
+                    default_config_json = json.dumps(default_config_dict)
+                    db.execute("INSERT INTO config (id, config_json) VALUES (1, ?)", (default_config_json,))
+                    db.commit()
+            else:
+                # No legacy file, create a new default config
+                default_config = AppConfig()
+                default_config.templates = _create_default_templates()
+                default_config.active_template_id = "tpl_01_default"
+                default_config_dict = _serialize_config(default_config)
+                default_config_json = json.dumps(default_config_dict)
+                db.execute("INSERT INTO config (id, config_json) VALUES (1, ?)", (default_config_json,))
+                db.commit()
 
-        if count == 0:
-            # Insert default config
-            default_config = AppConfig()
-            default_config.templates = _create_default_templates()
-            default_config.active_template_id = "tpl_01_default"
-
-            # Serialize to JSON
-            config_dict = _serialize_config(default_config)
-            config_json = json.dumps(config_dict)
-
-            cursor.execute(
-                "INSERT INTO config (id, config_json) VALUES (?, ?)",
-                (1, config_json)
-            )
-            conn.commit()
-
-        conn.close()
+        db.close()
 
 
 def load_config() -> AppConfig:

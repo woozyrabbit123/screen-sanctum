@@ -372,10 +372,10 @@ def server(port, host):
         click.echo("  pip install -e \".[api]\"", err=True)
         sys.exit(1)
 
-    # API Server is a Pro-gated feature - check for valid license
+    # API Server is a Pro-gated feature - check for valid "pro" tier license
     license_data = license_check.get_verified_license()
-    if not license_data:
-        click.echo("Error: API Server is a Pro-gated feature. No valid license found.", err=True)
+    if not license_data or license_data.tier != "pro":
+        click.echo("Error: API Server is a Pro-gated feature. A valid 'pro' tier license is required to run the server.", err=True)
         click.echo("", err=True)
         click.echo("The API Server is only available with a Pro license.", err=True)
         click.echo("To purchase a Pro license, visit: https://screensanctum.example.com/purchase", err=True)
