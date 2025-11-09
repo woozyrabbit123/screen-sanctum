@@ -18,12 +18,23 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 # Get the root directory (where this spec file is located)
 spec_root = os.path.abspath(SPECPATH)
 
+# Platform-aware Tesseract paths
+if sys.platform == "win32":
+    tesseract_vendor_dir = ('vendor/tesseract/windows', 'tesseract')
+    tessdata_vendor_dir = ('vendor/tesseract/windows/tessdata', 'tessdata')
+elif sys.platform == "darwin":
+    tesseract_vendor_dir = ('vendor/tesseract/macos', 'tesseract')
+    tessdata_vendor_dir = ('vendor/tesseract/macos/tessdata', 'tessdata')
+else:  # Assume linux
+    tesseract_vendor_dir = ('vendor/tesseract/linux', 'tesseract')
+    tessdata_vendor_dir = ('vendor/tesseract/linux/tessdata', 'tessdata')
+
 # Define paths to bundled resources
 # NOTE: You must populate vendor/ with Tesseract binaries before building
-# vendor/tesseract/windows/tesseract.exe
-# vendor/tesseract/windows/tessdata/eng.traineddata (and other language files)
-vendor_tesseract_path = os.path.join(spec_root, 'vendor', 'tesseract', 'windows')
-vendor_tessdata_path = os.path.join(vendor_tesseract_path, 'tessdata')
+# vendor/tesseract/{platform}/tesseract(.exe on Windows)
+# vendor/tesseract/{platform}/tessdata/eng.traineddata (and other language files)
+vendor_tesseract_path = os.path.join(spec_root, tesseract_vendor_dir[0])
+vendor_tessdata_path = os.path.join(spec_root, tessdata_vendor_dir[0])
 resources_path = os.path.join(spec_root, 'resources')
 
 # Build datas list - these files will be bundled into the executable
@@ -32,19 +43,19 @@ datas = []
 # Bundle Tesseract binaries (if vendor/ exists)
 if os.path.exists(vendor_tesseract_path):
     # Bundle all Tesseract files to 'tesseract/' in the bundle
-    datas.append((vendor_tesseract_path, 'tesseract'))
+    datas.append(tesseract_vendor_dir)
     print(f"✓ Found Tesseract binaries in vendor/")
 else:
-    print("⚠ Warning: vendor/tesseract/windows/ not found.")
+    print(f"⚠ Warning: {tesseract_vendor_dir[0]}/ not found.")
     print("  The built executable will require Tesseract to be installed on the target system.")
     print("  To create a fully standalone build, populate vendor/ with Tesseract binaries.")
 
 # Bundle tessdata separately to ensure it's in the right location
 if os.path.exists(vendor_tessdata_path):
-    datas.append((vendor_tessdata_path, 'tessdata'))
+    datas.append(tessdata_vendor_dir)
     print(f"✓ Found tessdata in vendor/")
 else:
-    print("⚠ Warning: vendor/tesseract/windows/tessdata/ not found.")
+    print(f"⚠ Warning: {tessdata_vendor_dir[0]}/ not found.")
 
 # Bundle application resources (icons, etc.)
 if os.path.exists(resources_path):
