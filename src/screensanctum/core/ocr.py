@@ -1,7 +1,9 @@
 """OCR functionality for text extraction from images."""
 
+import sys
+import os
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple, Optional
 import numpy as np
 import cv2
 import pytesseract
@@ -21,8 +23,99 @@ class OcrToken:
     conf: int
 
 
+def _get_tesseract_paths() -> Tuple[Optional[str], Optional[str]]:
+    """Get Tesseract executable and tessdata paths.
+
+    This function detects if the application is running as a PyInstaller bundle
+    (frozen) and returns the appropriate paths for Tesseract.
+
+    Returns:
+        Tuple of (tesseract_cmd, tessdata_prefix):
+        - tesseract_cmd: Path to tesseract executable
+        - tessdata_prefix: Path to tessdata directory
+
+    The function handles two scenarios:
+    1. Frozen (PyInstaller bundle): Use bundled Tesseract from _MEIPASS
+    2. Development: Use system-installed Tesseract
+    """
+    # Check if running as a PyInstaller bundle
+    if getattr(sys, 'frozen', False):
+        # Running as a PyInstaller bundle
+        # sys._MEIPASS is the temporary folder where PyInstaller extracts files
+        base_path = sys._MEIPASS
+
+        # Tesseract executable path (bundled in the package)
+        # Windows: tesseract/tesseract.exe
+        # Linux/Mac: tesseract/tesseract
+        if sys.platform == 'win32':
+            tess_cmd = os.path.join(base_path, 'tesseract', 'tesseract.exe')
+        else:
+            tess_cmd = os.path.join(base_path, 'tesseract', 'tesseract')
+
+        # Tessdata directory (bundled language data)
+        tessdata_prefix = os.path.join(base_path, 'tessdata')
+
+        # Verify the bundled files exist
+        if not os.path.exists(tess_cmd):
+            print(f"Warning: Bundled Tesseract not found at {tess_cmd}")
+            print("Falling back to system Tesseract...")
+            tess_cmd = 'tesseract'  # Try system Tesseract
+            tessdata_prefix = None
+
+        return tess_cmd, tessdata_prefix
+    else:
+        # Running in development mode - use system Tesseract
+        # pytesseract will use the default 'tesseract' command
+        tess_cmd = 'tesseract'
+
+        # Use environment variable if set, otherwise None (use Tesseract's default)
+        tessdata_prefix = os.environ.get('TESSDATA_PREFIX')
+
+        return tess_cmd, tessdata_prefix
+
+
+def check_ocr_engine() -> bool:
+    """Check if OCR engine (Tesseract) is available and working.
+
+    This function verifies that Tesseract is properly installed and configured.
+    It sets up the correct paths for both bundled (frozen) and development modes.
+
+    Returns:
+        True if Tesseract is available and working, False otherwise.
+    """
+    try:
+        # Get the correct paths for Tesseract
+        tess_cmd, tessdata_prefix = _get_tesseract_paths()
+
+        # Set Tesseract executable path
+        if tess_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tess_cmd
+
+        # Set tessdata path if specified
+        if tessdata_prefix:
+            os.environ['TESSDATA_PREFIX'] = tessdata_prefix
+
+        # Test Tesseract with a minimal image
+        test_image = Image.new('RGB', (1, 1), color='white')
+        pytesseract.image_to_string(test_image, timeout=5)
+
+        return True
+
+    except pytesseract.TesseractNotFoundError:
+        print("Error: Tesseract OCR engine not found.")
+        print("Please install Tesseract or ensure it's in your PATH.")
+        return False
+
+    except Exception as e:
+        print(f"Error checking OCR engine: {e}")
+        return False
+
+
 def run_ocr(image: Image.Image, conf_threshold: int = 60) -> List[OcrToken]:
     """Run OCR on an image and return tokens with bounding boxes.
+
+    This function automatically configures Tesseract paths for both
+    bundled (PyInstaller) and development environments.
 
     Args:
         image: PIL Image object to process.
@@ -30,7 +123,21 @@ def run_ocr(image: Image.Image, conf_threshold: int = 60) -> List[OcrToken]:
 
     Returns:
         List of OcrToken objects containing text, position, and confidence.
+
+    Raises:
+        pytesseract.TesseractNotFoundError: If Tesseract is not found.
     """
+    # Configure Tesseract paths (handles both frozen and development modes)
+    tess_cmd, tessdata_prefix = _get_tesseract_paths()
+
+    # Set Tesseract executable path
+    if tess_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tess_cmd
+
+    # Set tessdata path if specified
+    if tessdata_prefix:
+        os.environ['TESSDATA_PREFIX'] = tessdata_prefix
+
     # Convert PIL Image to NumPy array
     img_array = to_ocr_array(image)
 
