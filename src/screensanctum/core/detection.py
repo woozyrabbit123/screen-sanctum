@@ -1,6 +1,6 @@
 """Sensitive information detection."""
 
-import re
+import regex as re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import List, Tuple, Optional, TYPE_CHECKING
@@ -354,7 +354,9 @@ def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] =
             if not rule.name or not rule.regex:
                 continue  # Skip invalid rules
             try:
-                for match in re.finditer(rule.regex, full_text):
+                # This regex engine has built-in backtracking protection
+                # and will time out after 1 second.
+                for match in re.finditer(rule.regex, full_text, timeout=1, partial=True):
                     # Find tokens that contribute to this match
                     boxes = _tokens_for_match(match.start(), match.end(), char_to_token, tokens)
                     if not boxes:
@@ -367,7 +369,8 @@ def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] =
                         boxes=boxes
                     )
                     all_items.append(item)
-            except re.error:
-                pass  # Ignore invalid regex
+            except (re.error, TimeoutError):
+                # Catch both invalid regex AND regex that takes too long
+                pass
 
     return all_items

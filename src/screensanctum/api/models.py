@@ -1,12 +1,12 @@
 """Pydantic models for API request/response schemas."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RedactRequest(BaseModel):
     """Request model for redaction job submission."""
 
-    image_b64: str
+    image_b64: str = Field(..., max_length=20 * 1024 * 1024)
     template_id: str
 
 
