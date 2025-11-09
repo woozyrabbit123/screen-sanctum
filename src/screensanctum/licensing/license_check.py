@@ -1,9 +1,9 @@
-"""License validation functionality."""
+"""License validation functionality with enterprise-grade security."""
 
 import base64
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -21,14 +21,43 @@ class LicenseData:
     tier: str  # e.g., "pro"
     issued_at: datetime
     license_id: str
+    exp: datetime  # Expiry timestamp
+    nbf: datetime  # Not before timestamp
+    kid: str  # Key ID for key rotation
 
 
-# Hard-coded public key for license verification (ECDSA secp256r1)
-# This public key corresponds to the private key used to sign licenses
-PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
+# Public keys for license verification (key rotation support)
+# Map of key_id -> public_key_pem
+PUBLIC_KEYS = {
+    "key-2025-01": """-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAED4uzqk+/bnoCobCmSjR9/HcLDyT5
 TcrvIMTe7h1x8CqjtIBMV3HQrYJ3e8a+eYzzqa5n9QuEepfC56W+YJKfZg==
------END PUBLIC KEY-----"""
+-----END PUBLIC KEY-----""",
+}
+
+
+def _canonicalize_payload(payload: dict) -> bytes:
+    """Canonicalize payload to prevent signature bypass attacks.
+
+    This function creates a canonical representation of the payload by:
+    1. Sorting all keys
+    2. Removing all whitespace
+    3. Encoding to UTF-8
+
+    Args:
+        payload: Dictionary payload to canonicalize.
+
+    Returns:
+        Canonical byte representation of the payload.
+    """
+    # Sort keys and remove whitespace with separators
+    canonical_json = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(',', ':'),
+        ensure_ascii=False
+    )
+    return canonical_json.encode('utf-8')
 
 
 def verify_license(raw_license_bytes: bytes) -> Optional[LicenseData]:
@@ -36,6 +65,12 @@ def verify_license(raw_license_bytes: bytes) -> Optional[LicenseData]:
 
     License format is:
         SIGNATURE_BASE64\nPAYLOAD_JSON
+
+    This function performs:
+    1. Signature verification using ECDSA
+    2. Canonical JSON verification
+    3. Time-based validation (nbf/exp with 5 min skew)
+    4. Key rotation support via kid field
 
     Args:
         raw_license_bytes: Raw license file bytes.
@@ -62,45 +97,76 @@ def verify_license(raw_license_bytes: bytes) -> Optional[LicenseData]:
             print(f"Invalid base64 signature: {e}")
             return None
 
-        # Load public key
-        public_key = serialization.load_pem_public_key(
-            PUBLIC_KEY_PEM.encode('utf-8')
-        )
-
-        # Verify signature
-        payload_bytes = payload_json.encode('utf-8')
-        try:
-            public_key.verify(
-                signature,
-                payload_bytes,
-                ec.ECDSA(hashes.SHA256())
-            )
-        except InvalidSignature:
-            print("Invalid license signature")
-            return None
-
-        # Parse JSON payload
+        # Parse JSON payload first to get kid
         try:
             payload = json.loads(payload_json)
         except json.JSONDecodeError as e:
             print(f"Invalid JSON payload: {e}")
             return None
 
-        # Extract license data
+        # Get key ID for key rotation
+        kid = payload.get('kid')
+        if not kid:
+            print("Missing key ID (kid) in payload")
+            return None
+
+        # Load correct public key based on kid
+        public_key_pem = PUBLIC_KEYS.get(kid)
+        if not public_key_pem:
+            print(f"Unknown key ID: {kid}")
+            return None
+
+        public_key = serialization.load_pem_public_key(
+            public_key_pem.encode('utf-8')
+        )
+
+        # Canonicalize payload for verification
+        canonical_payload = _canonicalize_payload(payload)
+
+        # Verify signature against canonical payload
+        try:
+            public_key.verify(
+                signature,
+                canonical_payload,
+                ec.ECDSA(hashes.SHA256())
+            )
+        except InvalidSignature:
+            print("Invalid license signature")
+            return None
+
+        # Extract required fields
         email = payload.get('email')
         tier = payload.get('tier')
         issued_at_str = payload.get('issued_at')
         license_id = payload.get('license_id')
+        exp_str = payload.get('exp')
+        nbf_str = payload.get('nbf')
 
-        if not all([email, tier, issued_at_str, license_id]):
+        if not all([email, tier, issued_at_str, license_id, exp_str, nbf_str, kid]):
             print("Missing required license fields")
             return None
 
-        # Parse datetime
+        # Parse datetimes
         try:
             issued_at = datetime.fromisoformat(issued_at_str)
+            exp = datetime.fromisoformat(exp_str)
+            nbf = datetime.fromisoformat(nbf_str)
         except ValueError as e:
             print(f"Invalid datetime format: {e}")
+            return None
+
+        # Time-based validation with 5 min skew tolerance
+        now = datetime.utcnow()
+        skew = timedelta(minutes=5)
+
+        # Check not before (nbf)
+        if now < (nbf - skew):
+            print(f"License not yet valid (nbf: {nbf})")
+            return None
+
+        # Check expiry (exp)
+        if now > (exp + skew):
+            print(f"License expired (exp: {exp})")
             return None
 
         # Create and return license data
@@ -108,7 +174,10 @@ def verify_license(raw_license_bytes: bytes) -> Optional[LicenseData]:
             email=email,
             tier=tier,
             issued_at=issued_at,
-            license_id=license_id
+            license_id=license_id,
+            exp=exp,
+            nbf=nbf,
+            kid=kid
         )
 
     except Exception as e:
@@ -134,6 +203,7 @@ def get_verified_license() -> Optional[LicenseData]:
 # Developer tools for generating licenses
 if __name__ == "__main__":
     import sys
+    import uuid
 
     def generate_keypair():
         """Generate a new ECDSA keypair for license signing."""
@@ -158,16 +228,18 @@ if __name__ == "__main__":
 
         print("PRIVATE KEY (save this securely, DO NOT commit to git):")
         print(private_pem.decode('utf-8'))
-        print("\nPUBLIC KEY (paste this into PUBLIC_KEY_PEM constant):")
+        print("\nPUBLIC KEY (add this to PUBLIC_KEYS dict with a unique kid):")
         print(public_pem.decode('utf-8'))
 
-    def sign_license(private_key_pem: str, email: str, tier: str):
+    def sign_license(private_key_pem: str, email: str, tier: str, kid: str, days: int = 365):
         """Sign a license with the private key.
 
         Args:
             private_key_pem: Private key in PEM format.
             email: User's email address.
             tier: License tier (e.g., "pro").
+            kid: Key ID (must match entry in PUBLIC_KEYS).
+            days: License validity in days (default: 365).
         """
         print(f"\n=== Signing License for {email} ({tier}) ===\n")
 
@@ -177,30 +249,32 @@ if __name__ == "__main__":
             password=None
         )
 
-        # Create payload
-        import uuid
+        # Create payload with all required fields
+        now = datetime.utcnow()
         payload = {
             "email": email,
             "tier": tier,
-            "issued_at": datetime.now().isoformat(),
-            "license_id": str(uuid.uuid4())
+            "issued_at": now.isoformat(),
+            "license_id": str(uuid.uuid4()),
+            "nbf": now.isoformat(),  # Valid from now
+            "exp": (now + timedelta(days=days)).isoformat(),  # Valid for specified days
+            "kid": kid
         }
 
-        # Serialize to JSON
-        payload_json = json.dumps(payload, sort_keys=True)
-        payload_bytes = payload_json.encode('utf-8')
+        # Canonicalize payload before signing
+        canonical_payload = _canonicalize_payload(payload)
 
-        # Sign
+        # Sign canonical payload
         signature = private_key.sign(
-            payload_bytes,
+            canonical_payload,
             ec.ECDSA(hashes.SHA256())
         )
 
         # Encode signature as base64
         signature_b64 = base64.b64encode(signature).decode('utf-8')
 
-        # Create final license
-        license_content = f"{signature_b64}\n{payload_json}"
+        # Create final license (use canonical form for consistency)
+        license_content = f"{signature_b64}\n{canonical_payload.decode('utf-8')}"
 
         print("LICENSE FILE CONTENT (save as license.dat):")
         print("=" * 60)
@@ -220,7 +294,10 @@ if __name__ == "__main__":
             print(f"  Email: {verified.email}")
             print(f"  Tier: {verified.tier}")
             print(f"  Issued: {verified.issued_at}")
-            print(f"  ID: {verified.license_id}")
+            print(f"  Valid from: {verified.nbf}")
+            print(f"  Expires: {verified.exp}")
+            print(f"  Key ID: {verified.kid}")
+            print(f"  License ID: {verified.license_id}")
         else:
             print("✗ License verification failed!")
 
@@ -230,10 +307,11 @@ if __name__ == "__main__":
         print("=" * 50)
         print("\nUsage:")
         print("  python -m screensanctum.licensing.license_check generate")
-        print("  python -m screensanctum.licensing.license_check sign <email> <tier>")
+        print("  python -m screensanctum.licensing.license_check sign <email> <tier> <kid> [days]")
         print("\nExamples:")
         print("  python -m screensanctum.licensing.license_check generate")
-        print("  python -m screensanctum.licensing.license_check sign user@example.com pro")
+        print("  python -m screensanctum.licensing.license_check sign user@example.com pro key-2025-01")
+        print("  python -m screensanctum.licensing.license_check sign user@example.com pro key-2025-01 30")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -242,13 +320,22 @@ if __name__ == "__main__":
         generate_keypair()
 
     elif command == "sign":
-        if len(sys.argv) < 4:
-            print("Error: sign command requires email and tier")
-            print("Usage: python -m screensanctum.licensing.license_check sign <email> <tier>")
+        if len(sys.argv) < 5:
+            print("Error: sign command requires email, tier, and kid")
+            print("Usage: python -m screensanctum.licensing.license_check sign <email> <tier> <kid> [days]")
             sys.exit(1)
 
         email = sys.argv[2]
         tier = sys.argv[3]
+        kid = sys.argv[4]
+        days = int(sys.argv[5]) if len(sys.argv) > 5 else 365
+
+        # Verify kid exists in PUBLIC_KEYS
+        if kid not in PUBLIC_KEYS:
+            print(f"Warning: Key ID '{kid}' not found in PUBLIC_KEYS dict")
+            print(f"Available keys: {', '.join(PUBLIC_KEYS.keys())}")
+            print("License will be signed but may fail verification!")
+            print()
 
         # Prompt for private key
         print("Paste your PRIVATE KEY (including BEGIN/END lines), then press Ctrl+D:")
@@ -261,7 +348,7 @@ if __name__ == "__main__":
             pass
 
         private_key_pem = '\n'.join(private_key_lines)
-        sign_license(private_key_pem, email, tier)
+        sign_license(private_key_pem, email, tier, kid, days)
 
     else:
         print(f"Unknown command: {command}")
