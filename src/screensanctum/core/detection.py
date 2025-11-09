@@ -8,7 +8,7 @@ import phonenumbers
 from screensanctum.core.ocr import OcrToken
 
 if TYPE_CHECKING:
-    from screensanctum.core.config import TemplateIgnore
+    from screensanctum.core.config import TemplateIgnore, CustomRule
 
 
 class PiiType(Enum):
@@ -20,6 +20,7 @@ class PiiType(Enum):
     URL = auto()
     PHONE = auto()
     FACE = auto()  # Stub for later face detection
+    CUSTOM = auto()
 
 
 @dataclass
@@ -299,7 +300,7 @@ def _detect_phones(full_text: str, char_to_token: List[Optional[int]],
     return items
 
 
-def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] = None) -> List[DetectedItem]:
+def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] = None, custom_rules: Optional[List["CustomRule"]] = None) -> List[DetectedItem]:
     """Detect personally identifiable information from OCR tokens.
 
     This function:
@@ -311,6 +312,7 @@ def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] =
     Args:
         tokens: List of OCR tokens.
         ignore_list: Optional TemplateIgnore object with domains/emails to skip in detection.
+        custom_rules: Optional list of CustomRule objects for custom regex detection.
 
     Returns:
         List of DetectedItem objects containing detected PII.
@@ -345,5 +347,27 @@ def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] =
 
     # Detect phone numbers
     all_items.extend(_detect_phones(full_text, char_to_token, tokens))
+
+    # Process Custom Rules
+    if custom_rules:
+        for rule in custom_rules:
+            if not rule.name or not rule.regex:
+                continue  # Skip invalid rules
+            try:
+                for match in re.finditer(rule.regex, full_text):
+                    # Find tokens that contribute to this match
+                    boxes = _tokens_for_match(match.start(), match.end(), char_to_token, tokens)
+                    if not boxes:
+                        continue
+
+                    # Create a DetectedItem for this custom rule
+                    item = DetectedItem(
+                        pii_type=PiiType.CUSTOM,
+                        text=rule.name,  # Use the rule's name, not the matched text
+                        boxes=boxes
+                    )
+                    all_items.append(item)
+            except re.error:
+                pass  # Ignore invalid regex
 
     return all_items

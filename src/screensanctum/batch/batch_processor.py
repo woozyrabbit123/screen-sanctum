@@ -135,7 +135,7 @@ class BatchProcessor(QObject):
                     tokens = ocr.run_ocr(image, conf_threshold=template.ocr_conf)
 
                     # Run detection with template's ignore list
-                    items = detection.detect_pii(tokens, template.ignore)
+                    items = detection.detect_pii(tokens, template.ignore, template.custom_rules)
 
                     # Apply template policy to build regions
                     detected_regions = regions.apply_template_policy(items, template)
