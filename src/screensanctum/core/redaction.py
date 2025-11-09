@@ -18,16 +18,30 @@ def apply_redaction(image: Image.Image, regions: List[Region],
                     style: RedactionStyle = RedactionStyle.BLUR) -> Image.Image:
     """Apply redaction to specified regions in an image.
 
+    This function ensures irreversible export by:
+    1. Stripping all EXIF/XMP/ICC metadata
+    2. Flattening to opaque RGB (no alpha channel)
+    3. Applying redactions to selected regions
+
     Args:
         image: PIL Image object to redact.
         regions: List of Region objects to redact.
         style: RedactionStyle to use (BLUR, SOLID, or PIXELATE).
 
     Returns:
-        New PIL Image object with redactions applied.
+        New PIL Image object with redactions applied, stripped of metadata, and flattened to RGB.
     """
-    # Create a copy to avoid modifying the original
-    result = image.copy()
+    # Convert to RGB first (strips alpha channel and ensures consistent mode)
+    # This also ensures the image is in a standard format before redaction
+    if image.mode == 'RGBA':
+        # Create white background for transparency
+        rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+        rgb_image.paste(image, mask=image.split()[3])  # Use alpha as mask
+        result = rgb_image
+    elif image.mode != 'RGB':
+        result = image.convert('RGB')
+    else:
+        result = image.copy()
 
     # Filter to only selected regions
     selected_regions = [r for r in regions if r.selected]
@@ -54,7 +68,12 @@ def apply_redaction(image: Image.Image, regions: List[Region],
         elif style == RedactionStyle.PIXELATE:
             result = _apply_pixelate(result, x, y, x2, y2)
 
-    return result
+    # Create a completely new image without any metadata
+    # This strips EXIF, XMP, ICC profiles, and any other metadata
+    clean_image = Image.new('RGB', result.size)
+    clean_image.paste(result)
+
+    return clean_image
 
 
 def _apply_blur(image: Image.Image, x: int, y: int, x2: int, y2: int) -> Image.Image:

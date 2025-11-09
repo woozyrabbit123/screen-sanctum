@@ -108,24 +108,35 @@ def _tokens_for_match(start: int, end: int, char_to_token: List[Optional[int]],
 
 
 def _detect_emails(full_text: str, char_to_token: List[Optional[int]],
-                   tokens: List[OcrToken]) -> List[DetectedItem]:
+                   tokens: List[OcrToken], trusted_domains: List[str] = None) -> List[DetectedItem]:
     """Detect email addresses in text.
 
     Args:
         full_text: Full text to search.
         char_to_token: Character-to-token mapping.
         tokens: List of OCR tokens.
+        trusted_domains: List of trusted domains/emails to skip.
 
     Returns:
         List of DetectedItem objects for emails.
     """
+    if trusted_domains is None:
+        trusted_domains = []
+
     items = []
     for match in EMAIL_PATTERN.finditer(full_text):
+        email = match.group()
+
+        # Check if email or its domain is in trusted list
+        email_domain = email.split('@')[-1] if '@' in email else ''
+        if email in trusted_domains or email_domain in trusted_domains:
+            continue
+
         boxes = _tokens_for_match(match.start(), match.end(), char_to_token, tokens)
         if boxes:
             items.append(DetectedItem(
                 pii_type=PiiType.EMAIL,
-                text=match.group(),
+                text=email,
                 boxes=boxes
             ))
     return items
@@ -184,18 +195,23 @@ def _detect_urls(full_text: str, char_to_token: List[Optional[int]],
 
 
 def _detect_domains(full_text: str, char_to_token: List[Optional[int]],
-                    tokens: List[OcrToken], exclude_matches: List[DetectedItem]) -> List[DetectedItem]:
+                    tokens: List[OcrToken], exclude_matches: List[DetectedItem],
+                    trusted_domains: List[str] = None) -> List[DetectedItem]:
     """Detect domain names in text (excluding those already found in emails/URLs/IPs).
 
     Args:
         full_text: Full text to search.
         char_to_token: Character-to-token mapping.
-        tokens: List of OCR tokens.
+        tokens: List[OcrToken].
         exclude_matches: List of already detected items to exclude.
+        trusted_domains: List of trusted domains to skip.
 
     Returns:
         List of DetectedItem objects for domains.
     """
+    if trusted_domains is None:
+        trusted_domains = []
+
     items = []
 
     # Build set of character ranges to exclude
@@ -207,6 +223,8 @@ def _detect_domains(full_text: str, char_to_token: List[Optional[int]],
                 exclude_ranges.add(i)
 
     for match in DOMAIN_PATTERN.finditer(full_text):
+        domain = match.group()
+
         # Check if this match overlaps with any excluded ranges
         overlaps = False
         for i in range(match.start(), match.end()):
@@ -214,12 +232,16 @@ def _detect_domains(full_text: str, char_to_token: List[Optional[int]],
                 overlaps = True
                 break
 
+        # Skip if domain is in trusted list
+        if domain in trusted_domains:
+            continue
+
         if not overlaps:
             boxes = _tokens_for_match(match.start(), match.end(), char_to_token, tokens)
             if boxes:
                 items.append(DetectedItem(
                     pii_type=PiiType.DOMAIN,
-                    text=match.group(),
+                    text=domain,
                     boxes=boxes
                 ))
 
@@ -270,7 +292,7 @@ def _detect_phones(full_text: str, char_to_token: List[Optional[int]],
     return items
 
 
-def detect_pii(tokens: List[OcrToken]) -> List[DetectedItem]:
+def detect_pii(tokens: List[OcrToken], trusted_domains: List[str] = None) -> List[DetectedItem]:
     """Detect personally identifiable information from OCR tokens.
 
     This function:
@@ -281,12 +303,16 @@ def detect_pii(tokens: List[OcrToken]) -> List[DetectedItem]:
 
     Args:
         tokens: List of OCR tokens.
+        trusted_domains: Optional list of trusted domains/emails to skip in detection.
 
     Returns:
         List of DetectedItem objects containing detected PII.
     """
     if not tokens:
         return []
+
+    if trusted_domains is None:
+        trusted_domains = []
 
     # Build full text and character-to-token mapping
     full_text, char_to_token = _build_text_and_mapping(tokens)
@@ -295,7 +321,7 @@ def detect_pii(tokens: List[OcrToken]) -> List[DetectedItem]:
     all_items = []
 
     # Detect emails
-    all_items.extend(_detect_emails(full_text, char_to_token, tokens))
+    all_items.extend(_detect_emails(full_text, char_to_token, tokens, trusted_domains))
 
     # Detect IPs
     all_items.extend(_detect_ips(full_text, char_to_token, tokens))
@@ -304,7 +330,7 @@ def detect_pii(tokens: List[OcrToken]) -> List[DetectedItem]:
     all_items.extend(_detect_urls(full_text, char_to_token, tokens))
 
     # Detect domains (excluding emails, URLs, IPs)
-    all_items.extend(_detect_domains(full_text, char_to_token, tokens, all_items))
+    all_items.extend(_detect_domains(full_text, char_to_token, tokens, all_items, trusted_domains))
 
     # Detect phone numbers
     all_items.extend(_detect_phones(full_text, char_to_token, tokens))

@@ -2,6 +2,7 @@
 
 from typing import Optional
 from pathlib import Path
+from datetime import datetime, timedelta
 from PIL import Image
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -10,10 +11,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QDialog,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
+    QTextEdit,
+    QListWidget,
 )
-from PySide6.QtCore import Qt, QRect
-from PySide6.QtGui import QImage
+from PySide6.QtCore import Qt, QRect, QBuffer, QIODevice
+from PySide6.QtGui import QImage, QShortcut, QKeySequence, QGuiApplication
 
 from screensanctum.ui.image_canvas import ImageCanvas
 from screensanctum.ui.sidebar import Sidebar
@@ -23,7 +28,7 @@ from screensanctum.licensing import license_check, license_store
 
 
 class SettingsDialog(QDialog):
-    """Settings dialog (stub for now)."""
+    """Settings dialog for configuring trusted domains."""
 
     def __init__(self, app_config: config.AppConfig, parent=None):
         """Initialize settings dialog.
@@ -33,22 +38,57 @@ class SettingsDialog(QDialog):
             parent: Parent widget.
         """
         super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.setMinimumSize(400, 300)
+        self.setWindowTitle("Settings - Trusted Domains")
+        self.setMinimumSize(500, 400)
+        self.config = app_config
 
         layout = QVBoxLayout()
 
-        # Display current config
-        layout.addWidget(QLabel("<h2>Current Settings</h2>"))
-        layout.addWidget(QLabel(f"Redaction Style: {app_config.redaction_style}"))
-        layout.addWidget(QLabel(f"Auto Detect on Open: {app_config.auto_detect_on_open}"))
-        layout.addWidget(QLabel(f"OCR Confidence: {app_config.ocr_confidence_threshold}"))
-        layout.addWidget(QLabel(f"Show Sidebar: {app_config.show_sidebar}"))
-        layout.addWidget(QLabel(f"Theme: {app_config.theme}"))
+        # Header
+        layout.addWidget(QLabel("<h2>Trusted Domains</h2>"))
+        layout.addWidget(QLabel(
+            "Emails and domains listed below will be ignored during PII detection.<br>"
+            "Enter one domain per line (e.g., example.com or user@example.com)"
+        ))
 
-        layout.addWidget(QLabel("<p><i>Settings editing will be implemented in a future version.</i></p>"))
+        # List of trusted domains
+        self.domains_list = QTextEdit()
+        self.domains_list.setPlaceholderText("example.com\nuser@example.com")
+        self.domains_list.setPlainText('\n'.join(app_config.trusted_domains))
+        layout.addWidget(self.domains_list)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        save_btn.clicked.connect(self._on_save)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+
+        button_layout.addStretch()
+        button_layout.addWidget(save_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
 
         self.setLayout(layout)
+
+    def _on_save(self):
+        """Save the trusted domains to config."""
+        # Parse domains from text edit
+        text = self.domains_list.toPlainText()
+        domains = [line.strip() for line in text.split('\n') if line.strip()]
+
+        # Update config
+        self.config.trusted_domains = domains
+
+        # Save config
+        if config.save_config(self.config):
+            self.accept()
+        else:
+            QMessageBox.warning(
+                self,
+                "Save Error",
+                "Failed to save configuration."
+            )
 
 
 class MainWindow(QMainWindow):
@@ -77,6 +117,91 @@ class MainWindow(QMainWindow):
         # Connect signals
         self._connect_signals()
 
+        # Setup keyboard shortcuts
+        self._setup_shortcuts()
+
+        # Setup clipboard paste handler
+        self._setup_clipboard()
+
+    def _setup_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        # O - Open Image
+        QShortcut(QKeySequence("O"), self).activated.connect(self._on_open_image)
+
+        # E - Export
+        QShortcut(QKeySequence("E"), self).activated.connect(
+            lambda: self._on_export_safe_copy(redaction.RedactionStyle.SOLID)
+        )
+
+        # B - Blur
+        QShortcut(QKeySequence("B"), self).activated.connect(
+            lambda: self._on_export_safe_copy(redaction.RedactionStyle.BLUR)
+        )
+
+        # X - Solid (X for redact)
+        QShortcut(QKeySequence("X"), self).activated.connect(
+            lambda: self._on_export_safe_copy(redaction.RedactionStyle.SOLID)
+        )
+
+        # P - Pixelate
+        QShortcut(QKeySequence("P"), self).activated.connect(
+            lambda: self._on_export_safe_copy(redaction.RedactionStyle.PIXELATE)
+        )
+
+    def _setup_clipboard(self):
+        """Setup clipboard paste handler."""
+        # Ctrl+V / Cmd+V - Paste image from clipboard
+        paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, self)
+        paste_shortcut.activated.connect(self._on_paste_from_clipboard)
+
+    def _on_paste_from_clipboard(self):
+        """Handle pasting image from clipboard."""
+        clipboard = QGuiApplication.clipboard()
+        qimage = clipboard.image()
+
+        if not qimage.isNull():
+            try:
+                # Convert QImage to PIL Image
+                buffer = QBuffer()
+                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                qimage.save(buffer, "PNG")
+                buffer.close()
+
+                from io import BytesIO
+                pil_image = Image.open(BytesIO(buffer.data()))
+
+                # Set the image
+                self.image = pil_image
+                self.qimage = pil_to_qimage(pil_image)
+                self.current_image_path = None  # No file path for clipboard images
+                self.regions = []
+
+                # Update UI
+                self.image_canvas.set_image(self.qimage)
+                self.image_canvas.set_regions(self.regions)
+                self.sidebar.set_regions(self.regions)
+
+                # Auto-detect if Pro and enabled
+                if self.is_pro and self.config.auto_detect_on_open:
+                    self._run_auto_detection()
+
+                self.statusBar().showMessage("Image pasted from clipboard", 2000)
+
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Paste Error",
+                    f"Failed to paste image from clipboard:\n\n{str(e)}"
+                )
+        else:
+            self.statusBar().showMessage("No image in clipboard", 2000)
+
+    def _update_detection_status(self):
+        """Update the status bar with detection counts."""
+        total = len(self.regions)
+        selected = sum(1 for r in self.regions if r.selected)
+        self.statusBar().showMessage(f"Detected: {total} · Selected: {selected}", 0)
+
     @property
     def is_pro(self) -> bool:
         """Check if user has a valid Pro license.
@@ -97,6 +222,15 @@ class MainWindow(QMainWindow):
         open_action = file_menu.addAction("&Open Image...")
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._on_open_image)
+
+        file_menu.addSeparator()
+
+        # Copy to clipboard action
+        copy_clipboard_action = file_menu.addAction("Copy Safe Copy to &Clipboard")
+        copy_clipboard_action.setShortcut("Ctrl+Shift+C")
+        copy_clipboard_action.triggered.connect(
+            lambda: self._on_copy_to_clipboard(redaction.RedactionStyle.SOLID)
+        )
 
         file_menu.addSeparator()
 
@@ -223,8 +357,8 @@ class MainWindow(QMainWindow):
             # Run OCR
             tokens = ocr.run_ocr(self.image, conf_threshold=self.config.ocr_confidence_threshold)
 
-            # Run detection
-            items = detection.detect_pii(tokens)
+            # Run detection with trusted domains
+            items = detection.detect_pii(tokens, self.config.trusted_domains)
 
             # Build regions
             self.regions = regions.build_regions(items)
@@ -233,7 +367,8 @@ class MainWindow(QMainWindow):
             self.image_canvas.set_regions(self.regions)
             self.sidebar.set_regions(self.regions)
 
-            # Show result
+            # Update status bar with detection counts
+            self._update_detection_status()
             self.statusBar().showMessage(f"Detected {len(self.regions)} sensitive regions", 3000)
 
         except Exception as e:
@@ -254,6 +389,8 @@ class MainWindow(QMainWindow):
             self.regions[region_index].selected = is_checked
             # Refresh canvas to show visual change
             self.image_canvas.set_regions(self.regions)
+            # Update detection status
+            self._update_detection_status()
 
     def _on_manual_region(self, rect: QRect):
         """Handle manual region creation from canvas.
@@ -363,6 +500,54 @@ class MainWindow(QMainWindow):
             )
             self.statusBar().clearMessage()
 
+    def _on_copy_to_clipboard(self, style: redaction.RedactionStyle):
+        """Copy redacted image to clipboard.
+
+        Args:
+            style: RedactionStyle to use for redaction.
+        """
+        if not self.image:
+            QMessageBox.warning(
+                self,
+                "No Image",
+                "Please open an image first."
+            )
+            return
+
+        try:
+            # Apply redaction
+            self.statusBar().showMessage(f"Applying {style.name.lower()} redaction...", 0)
+
+            redacted_image = redaction.apply_redaction(
+                self.image,
+                self.regions,
+                style
+            )
+
+            # Convert PIL Image to QImage
+            redacted_qimage = pil_to_qimage(redacted_image)
+
+            # Copy to clipboard
+            clipboard = QGuiApplication.clipboard()
+            clipboard.setImage(redacted_qimage)
+
+            # Show success
+            self.statusBar().showMessage("Redacted image copied to clipboard", 3000)
+
+            QMessageBox.information(
+                self,
+                "Copied to Clipboard",
+                "Redacted image has been copied to clipboard."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Copy Error",
+                f"Failed to copy image to clipboard:\n\n{str(e)}"
+            )
+            self.statusBar().clearMessage()
+
     def _on_settings(self):
         """Show settings dialog."""
         dialog = SettingsDialog(self.config, self)
@@ -432,10 +617,27 @@ class MainWindow(QMainWindow):
         """Handle Help -> About action."""
         # Build license info section
         if self.is_pro and self.license_data:
+            # Mask email (show first char and domain)
+            email_parts = self.license_data.email.split('@')
+            if len(email_parts) == 2:
+                masked_email = f"{email_parts[0][0]}***@{email_parts[1]}"
+            else:
+                masked_email = "***"
+
+            # Format expiry date
+            exp_date = self.license_data.exp.strftime('%Y-%m-%d')
+
+            # Check if expiring soon (< 14 days)
+            days_until_expiry = (self.license_data.exp - datetime.utcnow()).days
+            expiry_warning = ""
+            if days_until_expiry < 14:
+                expiry_warning = f"<p style='color: #ff6b35;'><b>⚠ License expires in {days_until_expiry} days!</b></p>"
+
             license_info = (
-                f"<p><b>Licensed to:</b> {self.license_data.email}</p>"
                 f"<p><b>Tier:</b> {self.license_data.tier.upper()}</p>"
-                f"<p><b>License ID:</b> {self.license_data.license_id}</p>"
+                f"<p><b>Email:</b> {masked_email}</p>"
+                f"<p><b>Expires:</b> {exp_date}</p>"
+                f"{expiry_warning}"
             )
         else:
             license_info = (

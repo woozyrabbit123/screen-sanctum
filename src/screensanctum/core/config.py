@@ -1,9 +1,9 @@
 """Configuration management for ScreenSanctum."""
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 import platformdirs
 
 
@@ -11,12 +11,13 @@ import platformdirs
 class AppConfig:
     """Application configuration settings."""
 
-    redaction_style: str = "blur"  # "blur", "solid", or "pixelate"
+    redaction_style: str = "solid"  # "blur", "solid", or "pixelate"
     auto_detect_on_open: bool = True
     ocr_confidence_threshold: int = 60
     show_sidebar: bool = True
     theme: str = "system"  # "system", "light", or "dark"
     last_save_directory: str = ""
+    trusted_domains: List[str] = field(default_factory=list)  # Domains/emails to skip in detection
 
 
 def get_app_dirs() -> Dict[str, Path]:
@@ -67,12 +68,13 @@ def load_config() -> AppConfig:
 
         # Create AppConfig from loaded data, using defaults for missing fields
         return AppConfig(
-            redaction_style=data.get("redaction_style", "blur"),
+            redaction_style=data.get("redaction_style", "solid"),
             auto_detect_on_open=data.get("auto_detect_on_open", True),
             ocr_confidence_threshold=data.get("ocr_confidence_threshold", 60),
             show_sidebar=data.get("show_sidebar", True),
             theme=data.get("theme", "system"),
             last_save_directory=data.get("last_save_directory", ""),
+            trusted_domains=data.get("trusted_domains", []),
         )
     except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
         print(f"Error loading config: {e}")
