@@ -68,11 +68,12 @@ def test_detect_invalid_ip():
 
 def test_detect_phone():
     """Test phone number detection using phonenumbers library."""
-    # Create tokens representing "Call: (555) 123-4567"
+    # Create tokens representing "Call: (650) 253-0000"
+    # Using a real area code (650 = California) that phonenumbers will recognize
     tokens = [
         OcrToken(text="Call:", x=0, y=0, w=40, h=10, conf=99),
-        OcrToken(text="(555)", x=50, y=0, w=50, h=10, conf=99),
-        OcrToken(text="123-4567", x=110, y=0, w=80, h=10, conf=99),
+        OcrToken(text="(650)", x=50, y=0, w=50, h=10, conf=99),
+        OcrToken(text="253-0000", x=110, y=0, w=80, h=10, conf=99),
     ]
 
     # Run detection
@@ -86,21 +87,22 @@ def test_detect_phone():
     # Check that we found the phone number (format may vary slightly)
     phone_texts = [p.text for p in phones]
     # The phonenumbers library might format it differently
-    assert any("555" in text and "123" in text and "4567" in text for text in phone_texts)
+    assert any("650" in text and "253" in text for text in phone_texts)
 
 
 def test_detect_multiple_phones():
     """Test that multiple instances of the same phone are detected separately.
 
-    This is a critical bug fix: if "123-456-7890" appears twice in different
+    This is a critical bug fix: if a phone appears twice in different
     locations, we should get TWO DetectedItems, not one.
     """
     # Create tokens with the same phone number appearing twice
+    # Using 212 area code (New York) for validity
     tokens = [
         OcrToken(text="First:", x=0, y=0, w=50, h=10, conf=99),
-        OcrToken(text="555-123-4567", x=60, y=0, w=100, h=10, conf=99),
+        OcrToken(text="212-555-1212", x=60, y=0, w=100, h=10, conf=99),
         OcrToken(text="Second:", x=0, y=20, w=60, h=10, conf=99),
-        OcrToken(text="555-123-4567", x=70, y=20, w=100, h=10, conf=99),
+        OcrToken(text="212-555-1212", x=70, y=20, w=100, h=10, conf=99),
     ]
 
     # Run detection
@@ -113,8 +115,8 @@ def test_detect_multiple_phones():
     # Even though the text is the same, they're at different positions
     assert len(phones) == 2, f"Expected 2 phone detections, got {len(phones)}"
 
-    # Both should have the same text
-    assert all("555" in p.text for p in phones)
+    # Both should have the same text content
+    assert all("212" in p.text and "555" in p.text for p in phones)
 
     # But different bounding boxes
     boxes_set_1 = phones[0].boxes
@@ -188,13 +190,14 @@ def test_detect_domain():
 def test_detect_mixed_pii():
     """Test detection of multiple PII types in one text."""
     # Create tokens with email, IP, and phone
+    # Using 415 area code (San Francisco) for valid phone
     tokens = [
         OcrToken(text="Contact:", x=0, y=0, w=70, h=10, conf=99),
         OcrToken(text="admin@server.com", x=80, y=0, w=150, h=10, conf=99),
         OcrToken(text="IP:", x=0, y=20, w=30, h=10, conf=99),
         OcrToken(text="10.0.0.1", x=40, y=20, w=80, h=10, conf=99),
         OcrToken(text="Phone:", x=0, y=40, w=60, h=10, conf=99),
-        OcrToken(text="555-1234", x=70, y=40, w=80, h=10, conf=99),
+        OcrToken(text="415-555-0123", x=70, y=40, w=120, h=10, conf=99),
     ]
 
     # Run detection
