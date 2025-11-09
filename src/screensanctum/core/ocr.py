@@ -144,11 +144,18 @@ def run_ocr(image: Image.Image, conf_threshold: int = 60) -> List[OcrToken]:
     # Downsample large images to prevent memory issues
     # Create a copy for OCR
     image_copy = image.copy()
+    scale_factor = 1.0
 
     if image_copy.width > MAX_OCR_DIMENSION or image_copy.height > MAX_OCR_DIMENSION:
+        # Calculate the scale factor *before* thumbnailing
+        original_size = image_copy.size
         image_copy.thumbnail((MAX_OCR_DIMENSION, MAX_OCR_DIMENSION), Image.Resampling.LANCZOS)
+        new_size = image_copy.size
 
-    # Run OCR on the copy, not the original
+        # We will assume scaling is uniform, pick the width
+        scale_factor = new_size[0] / original_size[0]
+
+    # Run OCR on the (potentially) smaller copy
     img_array = to_ocr_array(image_copy)
 
     # Preprocess image for better OCR results
@@ -203,4 +210,20 @@ def run_ocr(image: Image.Image, conf_threshold: int = 60) -> List[OcrToken]:
         )
         tokens.append(token)
 
-    return tokens
+    # Rescale tokens if we scaled the image
+    if scale_factor != 1.0:
+        rescaled_tokens = []
+        for token in tokens:
+            rescaled_tokens.append(
+                OcrToken(
+                    text=token.text,
+                    x=int(token.x / scale_factor),
+                    y=int(token.y / scale_factor),
+                    w=int(token.w / scale_factor),
+                    h=int(token.h / scale_factor),
+                    conf=token.conf
+                )
+            )
+        return rescaled_tokens  # Return the rescaled tokens
+
+    return tokens  # Return the original tokens if no scaling happened
