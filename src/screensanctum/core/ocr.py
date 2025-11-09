@@ -217,10 +217,10 @@ def run_ocr(image: Image.Image, conf_threshold: int = 60) -> List[OcrToken]:
             rescaled_tokens.append(
                 OcrToken(
                     text=token.text,
-                    x=int(token.x / scale_factor),
-                    y=int(token.y / scale_factor),
-                    w=int(token.w / scale_factor),
-                    h=int(token.h / scale_factor),
+                    x=round(token.x / scale_factor),
+                    y=round(token.y / scale_factor),
+                    w=round(token.w / scale_factor),
+                    h=round(token.h / scale_factor),
                     conf=token.conf
                 )
             )

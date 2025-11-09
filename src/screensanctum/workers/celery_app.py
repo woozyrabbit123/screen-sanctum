@@ -5,8 +5,8 @@ from celery import Celery
 # Create Celery app instance
 celery_app = Celery(
     "screensanctum",
-    broker="redis://localhost:6379/0",
-    backend="redis://localhost:6379/0",
+    broker="redis://:YOUR_STRONG_PASSWORD_HERE@localhost:6379/0",
+    backend="redis://:YOUR_STRONG_PASSWORD_HERE@localhost:6379/0",
 )
 
 # Configure Celery
