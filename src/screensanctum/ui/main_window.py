@@ -25,6 +25,7 @@ from PySide6.QtGui import QImage, QShortcut, QKeySequence, QGuiApplication
 from screensanctum.ui.image_canvas import ImageCanvas
 from screensanctum.ui.sidebar import Sidebar
 from screensanctum.ui.utils import pil_to_qimage
+from screensanctum.ui.batch_dialog import BatchDialog
 from screensanctum.core import image_loader, ocr, detection, regions, redaction, config
 from screensanctum.licensing import license_check, license_store
 
@@ -428,6 +429,15 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # Batch processing action (Pro only)
+        batch_action = file_menu.addAction("Run &Batch Process...")
+        batch_action.triggered.connect(self._on_batch_process)
+        if not self.is_pro:
+            batch_action.setEnabled(False)
+            batch_action.setToolTip("Pro feature - Upgrade to process folders of images")
+
+        file_menu.addSeparator()
+
         # Settings action
         settings_action = file_menu.addAction("&Settings...")
         settings_action.triggered.connect(self._on_settings)
@@ -812,6 +822,11 @@ class MainWindow(QMainWindow):
                 if template.id == self.config.active_template_id:
                     self.template_selector.setCurrentIndex(i)
                     break
+
+    def _on_batch_process(self):
+        """Show batch processing dialog."""
+        dialog = BatchDialog(self.config, self.is_pro, self)
+        dialog.exec()
 
     def _on_enter_license(self):
         """Handle Help -> Enter License action."""
