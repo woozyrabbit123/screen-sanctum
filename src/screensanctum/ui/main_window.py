@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextEdit,
     QListWidget,
+    QComboBox,
+    QToolBar,
 )
 from PySide6.QtCore import Qt, QRect, QBuffer, QIODevice
 from PySide6.QtGui import QImage, QShortcut, QKeySequence, QGuiApplication
@@ -27,68 +29,225 @@ from screensanctum.core import image_loader, ocr, detection, regions, redaction,
 from screensanctum.licensing import license_check, license_store
 
 
-class SettingsDialog(QDialog):
-    """Settings dialog for configuring trusted domains."""
+class TemplateManagerDialog(QDialog):
+    """Template Manager dialog for Pro users to manage redaction templates."""
 
-    def __init__(self, app_config: config.AppConfig, parent=None):
-        """Initialize settings dialog.
+    def __init__(self, app_config: config.AppConfig, is_pro: bool, parent=None):
+        """Initialize template manager dialog.
 
         Args:
             app_config: Current application configuration.
+            is_pro: Whether user has Pro license.
             parent: Parent widget.
         """
         super().__init__(parent)
-        self.setWindowTitle("Settings - Trusted Domains")
-        self.setMinimumSize(500, 400)
+        self.setWindowTitle("Template Manager")
+        self.setMinimumSize(800, 600)
         self.config = app_config
+        self.is_pro = is_pro
+        self.selected_template: Optional[config.RedactionTemplate] = None
 
         layout = QVBoxLayout()
 
-        # Header
-        layout.addWidget(QLabel("<h2>Trusted Domains</h2>"))
-        layout.addWidget(QLabel(
-            "Emails and domains listed below will be ignored during PII detection.<br>"
-            "Enter one domain per line (e.g., example.com or user@example.com)"
-        ))
+        if not is_pro:
+            # Pro feature overlay
+            overlay = QLabel("<h2>⭐ Pro Feature</h2>"
+                           "<p>Template management is a Pro feature.</p>"
+                           "<p>Upgrade to Pro to create, edit, and manage custom redaction templates.</p>")
+            overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            overlay.setStyleSheet("background-color: #f0f0f0; padding: 20px; border: 2px solid #ccc;")
+            layout.addWidget(overlay)
+        else:
+            # Full template manager UI
+            layout.addWidget(QLabel("<h2>Redaction Templates</h2>"))
 
-        # List of trusted domains
-        self.domains_list = QTextEdit()
-        self.domains_list.setPlaceholderText("example.com\nuser@example.com")
-        self.domains_list.setPlainText('\n'.join(app_config.trusted_domains))
-        layout.addWidget(self.domains_list)
+            # Main horizontal layout: list on left, editor on right
+            main_layout = QHBoxLayout()
 
-        # Buttons
+            # Left: Template list
+            left_layout = QVBoxLayout()
+            left_layout.addWidget(QLabel("<b>Templates:</b>"))
+            self.template_list = QListWidget()
+            self.template_list.currentRowChanged.connect(self._on_template_selected)
+            left_layout.addWidget(self.template_list)
+
+            # Buttons for list management
+            list_buttons = QHBoxLayout()
+            new_btn = QPushButton("New")
+            new_btn.clicked.connect(self._on_new_template)
+            duplicate_btn = QPushButton("Duplicate")
+            duplicate_btn.clicked.connect(self._on_duplicate_template)
+            delete_btn = QPushButton("Delete")
+            delete_btn.clicked.connect(self._on_delete_template)
+            list_buttons.addWidget(new_btn)
+            list_buttons.addWidget(duplicate_btn)
+            list_buttons.addWidget(delete_btn)
+            left_layout.addLayout(list_buttons)
+
+            main_layout.addLayout(left_layout, 1)
+
+            # Right: Template editor
+            right_layout = QVBoxLayout()
+            right_layout.addWidget(QLabel("<b>Template Editor:</b>"))
+
+            # Template name
+            name_layout = QHBoxLayout()
+            name_layout.addWidget(QLabel("Name:"))
+            self.name_edit = QTextEdit()
+            self.name_edit.setMaximumHeight(30)
+            self.name_edit.setPlaceholderText("Template Name")
+            name_layout.addWidget(self.name_edit)
+            right_layout.addLayout(name_layout)
+
+            # Ignore lists
+            right_layout.addWidget(QLabel("<b>Ignore Lists:</b>"))
+            right_layout.addWidget(QLabel("Ignored Emails (one per line):"))
+            self.ignored_emails_edit = QTextEdit()
+            self.ignored_emails_edit.setPlaceholderText("user@example.com")
+            self.ignored_emails_edit.setMaximumHeight(80)
+            right_layout.addWidget(self.ignored_emails_edit)
+
+            right_layout.addWidget(QLabel("Ignored Domains (one per line):"))
+            self.ignored_domains_edit = QTextEdit()
+            self.ignored_domains_edit.setPlaceholderText("example.com")
+            self.ignored_domains_edit.setMaximumHeight(80)
+            right_layout.addWidget(self.ignored_domains_edit)
+
+            # Default redaction style
+            style_layout = QHBoxLayout()
+            style_layout.addWidget(QLabel("Default Style:"))
+            self.style_combo = QComboBox()
+            self.style_combo.addItem("Solid", redaction.RedactionStyle.SOLID)
+            self.style_combo.addItem("Blur", redaction.RedactionStyle.BLUR)
+            self.style_combo.addItem("Pixelate", redaction.RedactionStyle.PIXELATE)
+            style_layout.addWidget(self.style_combo)
+            style_layout.addStretch()
+            right_layout.addLayout(style_layout)
+
+            # Save button for editor
+            save_template_btn = QPushButton("Save Template")
+            save_template_btn.clicked.connect(self._on_save_template)
+            right_layout.addWidget(save_template_btn)
+
+            right_layout.addStretch()
+            main_layout.addLayout(right_layout, 2)
+
+            layout.addLayout(main_layout)
+
+            # Populate template list
+            self._refresh_template_list()
+
+        # Close button
         button_layout = QHBoxLayout()
-        save_btn = QPushButton("Save")
-        save_btn.clicked.connect(self._on_save)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
         button_layout.addStretch()
-        button_layout.addWidget(save_btn)
-        button_layout.addWidget(cancel_btn)
+        button_layout.addWidget(close_btn)
         layout.addLayout(button_layout)
 
         self.setLayout(layout)
 
-    def _on_save(self):
-        """Save the trusted domains to config."""
-        # Parse domains from text edit
-        text = self.domains_list.toPlainText()
-        domains = [line.strip() for line in text.split('\n') if line.strip()]
+    def _refresh_template_list(self):
+        """Refresh the template list widget."""
+        self.template_list.clear()
+        for template in self.config.templates:
+            self.template_list.addItem(template.name)
 
-        # Update config
-        self.config.trusted_domains = domains
+    def _on_template_selected(self, row: int):
+        """Handle template selection from list."""
+        if row < 0 or row >= len(self.config.templates):
+            return
+
+        self.selected_template = self.config.templates[row]
+        self._load_template_to_editor(self.selected_template)
+
+    def _load_template_to_editor(self, template: config.RedactionTemplate):
+        """Load a template's data into the editor."""
+        self.name_edit.setPlainText(template.name)
+        self.ignored_emails_edit.setPlainText('\n'.join(template.ignore.emails))
+        self.ignored_domains_edit.setPlainText('\n'.join(template.ignore.domains))
+
+        # Set style combo box
+        for i in range(self.style_combo.count()):
+            if self.style_combo.itemData(i) == template.style.default:
+                self.style_combo.setCurrentIndex(i)
+                break
+
+    def _on_save_template(self):
+        """Save the current template from editor."""
+        if not self.selected_template:
+            QMessageBox.warning(self, "No Template Selected", "Please select a template to edit.")
+            return
+
+        # Update template from editor
+        self.selected_template.name = self.name_edit.toPlainText().strip()
+        self.selected_template.ignore.emails = [
+            line.strip() for line in self.ignored_emails_edit.toPlainText().split('\n') if line.strip()
+        ]
+        self.selected_template.ignore.domains = [
+            line.strip() for line in self.ignored_domains_edit.toPlainText().split('\n') if line.strip()
+        ]
+        self.selected_template.style.default = self.style_combo.currentData()
 
         # Save config
         if config.save_config(self.config):
-            self.accept()
+            self._refresh_template_list()
+            QMessageBox.information(self, "Saved", "Template saved successfully.")
         else:
-            QMessageBox.warning(
-                self,
-                "Save Error",
-                "Failed to save configuration."
-            )
+            QMessageBox.warning(self, "Save Error", "Failed to save template.")
+
+    def _on_new_template(self):
+        """Create a new template."""
+        import uuid
+        new_id = f"tpl_custom_{uuid.uuid4().hex[:8]}"
+        new_template = config.RedactionTemplate(
+            id=new_id,
+            name="New Template"
+        )
+        self.config.templates.append(new_template)
+        config.save_config(self.config)
+        self._refresh_template_list()
+        # Select the new template
+        self.template_list.setCurrentRow(len(self.config.templates) - 1)
+
+    def _on_duplicate_template(self):
+        """Duplicate the selected template."""
+        if not self.selected_template:
+            QMessageBox.warning(self, "No Selection", "Please select a template to duplicate.")
+            return
+
+        import uuid
+        import copy
+        new_id = f"tpl_custom_{uuid.uuid4().hex[:8]}"
+        new_template = copy.deepcopy(self.selected_template)
+        new_template.id = new_id
+        new_template.name = f"{self.selected_template.name} (Copy)"
+        self.config.templates.append(new_template)
+        config.save_config(self.config)
+        self._refresh_template_list()
+
+    def _on_delete_template(self):
+        """Delete the selected template."""
+        if not self.selected_template:
+            QMessageBox.warning(self, "No Selection", "Please select a template to delete.")
+            return
+
+        # Prevent deleting the last template
+        if len(self.config.templates) <= 1:
+            QMessageBox.warning(self, "Cannot Delete", "Cannot delete the last template.")
+            return
+
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete '{self.selected_template.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.config.templates.remove(self.selected_template)
+            config.save_config(self.config)
+            self._refresh_template_list()
+            self.selected_template = None
 
 
 class MainWindow(QMainWindow):
@@ -110,6 +269,9 @@ class MainWindow(QMainWindow):
 
         # Create menu bar
         self._create_menu_bar()
+
+        # Create toolbar
+        self._create_toolbar()
 
         # Create central widget with splitter
         self._create_central_widget()
@@ -179,8 +341,8 @@ class MainWindow(QMainWindow):
                 # Update UI
                 self.image_canvas.set_image(self.qimage)
 
-                # Run auto-detection if pro and enabled
-                if self.is_pro and self.config.auto_detect_on_open:
+                # Run auto-detection if Pro user
+                if self.is_pro:
                     self._run_detection()
                 else:
                     # No detection - clear regions
@@ -213,6 +375,35 @@ class MainWindow(QMainWindow):
             True if license is valid and tier is "pro", False otherwise.
         """
         return self.license_data is not None and self.license_data.tier == "pro"
+
+    def get_active_template(self) -> config.RedactionTemplate:
+        """Get the currently active redaction template.
+
+        Returns:
+            RedactionTemplate object for the active template.
+        """
+        for template in self.config.templates:
+            if template.id == self.config.active_template_id:
+                return template
+        # Fallback to first template if active not found
+        if self.config.templates:
+            return self.config.templates[0]
+        # Ultimate fallback - create a default template
+        return config.RedactionTemplate(id="default", name="Default")
+
+    def get_template_by_id(self, template_id: str) -> Optional[config.RedactionTemplate]:
+        """Get a template by its ID.
+
+        Args:
+            template_id: ID of the template to retrieve.
+
+        Returns:
+            RedactionTemplate object if found, None otherwise.
+        """
+        for template in self.config.templates:
+            if template.id == template_id:
+                return template
+        return None
 
     def _create_menu_bar(self):
         """Create the application menu bar."""
@@ -260,6 +451,61 @@ class MainWindow(QMainWindow):
         # About action
         about_action = help_menu.addAction("&About ScreenSanctum")
         about_action.triggered.connect(self._on_about)
+
+    def _create_toolbar(self):
+        """Create the application toolbar with template selector."""
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+
+        # Add template selector
+        toolbar.addWidget(QLabel("Template: "))
+        self.template_selector = QComboBox()
+        self.template_selector.setMinimumWidth(200)
+
+        # Populate with templates
+        for template in self.config.templates:
+            self.template_selector.addItem(template.name, template.id)
+
+        # Set current template
+        current_index = 0
+        for i, template in enumerate(self.config.templates):
+            if template.id == self.config.active_template_id:
+                current_index = i
+                break
+        self.template_selector.setCurrentIndex(current_index)
+
+        # Connect signal
+        self.template_selector.currentIndexChanged.connect(self._on_template_changed)
+
+        # Pro gating: disable if not Pro
+        if not self.is_pro:
+            self.template_selector.setEnabled(False)
+            self.template_selector.setToolTip("Pro feature - Upgrade to customize templates")
+
+        toolbar.addWidget(self.template_selector)
+
+    def _on_template_changed(self, index: int):
+        """Handle template selection change.
+
+        Args:
+            index: Index of selected template in combo box.
+        """
+        if index < 0:
+            return
+
+        # Get selected template ID
+        template_id = self.template_selector.itemData(index)
+        if not template_id:
+            return
+
+        # Update config
+        self.config.active_template_id = template_id
+        config.save_config(self.config)
+
+        # Re-run detection on current image if loaded
+        if self.image and self.is_pro:
+            self._run_detection()
 
     def _create_central_widget(self):
         """Create the central widget with image canvas and sidebar."""
@@ -323,8 +569,8 @@ class MainWindow(QMainWindow):
             # Display in canvas
             self.image_canvas.set_image(self.qimage)
 
-            # Run auto-detection if pro and enabled
-            if self.is_pro and self.config.auto_detect_on_open:
+            # Run auto-detection if Pro user
+            if self.is_pro:
                 self._run_detection()
             else:
                 # No detection - clear regions
@@ -349,22 +595,25 @@ class MainWindow(QMainWindow):
             )
 
     def _run_detection(self):
-        """Run OCR and PII detection on the current image."""
+        """Run OCR and PII detection on the current image using active template."""
         if not self.image:
             return
 
         try:
+            # Get active template
+            template = self.get_active_template()
+
             # Show status message
             self.statusBar().showMessage("Running OCR and detection...", 2000)
 
-            # Run OCR
-            tokens = ocr.run_ocr(self.image, conf_threshold=self.config.ocr_confidence_threshold)
+            # Run OCR with template's confidence threshold
+            tokens = ocr.run_ocr(self.image, conf_threshold=template.ocr_conf)
 
-            # Run detection with trusted domains
-            items = detection.detect_pii(tokens, self.config.trusted_domains)
+            # Run detection with template's ignore list
+            items = detection.detect_pii(tokens, template.ignore)
 
-            # Build regions
-            self.regions = regions.build_regions(items)
+            # Apply template policy to build regions with proper selection
+            self.regions = regions.apply_template_policy(items, template)
 
             # Update UI
             self.image_canvas.set_regions(self.regions)
@@ -420,15 +669,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Manual region added", 2000)
 
     def _on_export_default(self):
-        """Export using default redaction style from config."""
-        # Map config string to RedactionStyle enum
-        style_map = {
-            "blur": redaction.RedactionStyle.BLUR,
-            "solid": redaction.RedactionStyle.SOLID,
-            "pixelate": redaction.RedactionStyle.PIXELATE,
-        }
-
-        style = style_map.get(self.config.redaction_style, redaction.RedactionStyle.BLUR)
+        """Export using default redaction style from active template."""
+        template = self.get_active_template()
+        style = template.style.default
         self._on_export_safe_copy(style)
 
     def _on_export_safe_copy(self, style: redaction.RedactionStyle):
@@ -552,9 +795,23 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
 
     def _on_settings(self):
-        """Show settings dialog."""
-        dialog = SettingsDialog(self.config, self)
-        dialog.exec()
+        """Show template manager dialog."""
+        dialog = TemplateManagerDialog(self.config, self.is_pro, self)
+        result = dialog.exec()
+
+        # Refresh template selector if templates changed
+        if result == QDialog.DialogCode.Accepted:
+            # Reload config
+            self.config = config.load_config()
+            # Refresh template selector
+            self.template_selector.clear()
+            for template in self.config.templates:
+                self.template_selector.addItem(template.name, template.id)
+            # Set current template
+            for i, template in enumerate(self.config.templates):
+                if template.id == self.config.active_template_id:
+                    self.template_selector.setCurrentIndex(i)
+                    break
 
     def _on_enter_license(self):
         """Handle Help -> Enter License action."""

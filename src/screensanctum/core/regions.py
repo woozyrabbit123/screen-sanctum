@@ -1,8 +1,11 @@
 """Region management for image redaction."""
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from screensanctum.core.detection import PiiType, DetectedItem
+
+if TYPE_CHECKING:
+    from screensanctum.core.config import RedactionTemplate
 
 
 @dataclass
@@ -103,3 +106,43 @@ def create_manual_region(x: int, y: int, w: int, h: int) -> Region:
         selected=True,
         manual=True
     )
+
+
+def apply_template_policy(detections: List[DetectedItem], template: "RedactionTemplate") -> List[Region]:
+    """Apply template policy to detected items to create regions with proper selection state.
+
+    This function:
+    1. Builds regions from detected items
+    2. Applies template rules to set region.selected based on:
+       - url_flag_query_params: If True, URLs with query params are selected
+       - Detector enablement (checked elsewhere during detection)
+    3. Does not filter out items; just marks them as unselected if ignored
+
+    Args:
+        detections: List of DetectedItem objects from detection.
+        template: RedactionTemplate containing policy rules.
+
+    Returns:
+        List of Region objects with proper selection state.
+    """
+    # Build base regions from detections
+    regions = build_regions(detections)
+
+    # Apply template policy rules
+    for i, region in enumerate(regions):
+        detection = detections[i]
+
+        # Apply URL query parameter policy
+        if region.pii_type == PiiType.URL:
+            # If template flags URLs with query params, select only those
+            if template.url_flag_query_params and detection.has_query_params:
+                region.selected = True
+            elif template.url_flag_query_params and not detection.has_query_params:
+                # URL without query params - don't select if flag is enabled
+                region.selected = False
+            else:
+                # url_flag_query_params is False - select all URLs
+                region.selected = True
+        # Other PII types are selected by default (already set in merge_boxes)
+
+    return regions

@@ -3,9 +3,12 @@
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, TYPE_CHECKING
 import phonenumbers
 from screensanctum.core.ocr import OcrToken
+
+if TYPE_CHECKING:
+    from screensanctum.core.config import TemplateIgnore
 
 
 class PiiType(Enum):
@@ -108,28 +111,32 @@ def _tokens_for_match(start: int, end: int, char_to_token: List[Optional[int]],
 
 
 def _detect_emails(full_text: str, char_to_token: List[Optional[int]],
-                   tokens: List[OcrToken], trusted_domains: List[str] = None) -> List[DetectedItem]:
+                   tokens: List[OcrToken], ignore_emails: List[str] = None,
+                   ignore_domains: List[str] = None) -> List[DetectedItem]:
     """Detect email addresses in text.
 
     Args:
         full_text: Full text to search.
         char_to_token: Character-to-token mapping.
         tokens: List of OCR tokens.
-        trusted_domains: List of trusted domains/emails to skip.
+        ignore_emails: List of emails to skip.
+        ignore_domains: List of domains to skip.
 
     Returns:
         List of DetectedItem objects for emails.
     """
-    if trusted_domains is None:
-        trusted_domains = []
+    if ignore_emails is None:
+        ignore_emails = []
+    if ignore_domains is None:
+        ignore_domains = []
 
     items = []
     for match in EMAIL_PATTERN.finditer(full_text):
         email = match.group()
 
-        # Check if email or its domain is in trusted list
+        # Check if email or its domain is in ignore list
         email_domain = email.split('@')[-1] if '@' in email else ''
-        if email in trusted_domains or email_domain in trusted_domains:
+        if email in ignore_emails or email_domain in ignore_domains:
             continue
 
         boxes = _tokens_for_match(match.start(), match.end(), char_to_token, tokens)
@@ -196,7 +203,7 @@ def _detect_urls(full_text: str, char_to_token: List[Optional[int]],
 
 def _detect_domains(full_text: str, char_to_token: List[Optional[int]],
                     tokens: List[OcrToken], exclude_matches: List[DetectedItem],
-                    trusted_domains: List[str] = None) -> List[DetectedItem]:
+                    ignore_domains: List[str] = None) -> List[DetectedItem]:
     """Detect domain names in text (excluding those already found in emails/URLs/IPs).
 
     Args:
@@ -204,13 +211,13 @@ def _detect_domains(full_text: str, char_to_token: List[Optional[int]],
         char_to_token: Character-to-token mapping.
         tokens: List[OcrToken].
         exclude_matches: List of already detected items to exclude.
-        trusted_domains: List of trusted domains to skip.
+        ignore_domains: List of domains to skip.
 
     Returns:
         List of DetectedItem objects for domains.
     """
-    if trusted_domains is None:
-        trusted_domains = []
+    if ignore_domains is None:
+        ignore_domains = []
 
     items = []
 
@@ -232,8 +239,8 @@ def _detect_domains(full_text: str, char_to_token: List[Optional[int]],
                 overlaps = True
                 break
 
-        # Skip if domain is in trusted list
-        if domain in trusted_domains:
+        # Skip if domain is in ignore list
+        if domain in ignore_domains:
             continue
 
         if not overlaps:
@@ -292,7 +299,7 @@ def _detect_phones(full_text: str, char_to_token: List[Optional[int]],
     return items
 
 
-def detect_pii(tokens: List[OcrToken], trusted_domains: List[str] = None) -> List[DetectedItem]:
+def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] = None) -> List[DetectedItem]:
     """Detect personally identifiable information from OCR tokens.
 
     This function:
@@ -303,7 +310,7 @@ def detect_pii(tokens: List[OcrToken], trusted_domains: List[str] = None) -> Lis
 
     Args:
         tokens: List of OCR tokens.
-        trusted_domains: Optional list of trusted domains/emails to skip in detection.
+        ignore_list: Optional TemplateIgnore object with domains/emails to skip in detection.
 
     Returns:
         List of DetectedItem objects containing detected PII.
@@ -311,8 +318,12 @@ def detect_pii(tokens: List[OcrToken], trusted_domains: List[str] = None) -> Lis
     if not tokens:
         return []
 
-    if trusted_domains is None:
-        trusted_domains = []
+    # Extract ignore lists from template
+    ignore_emails = []
+    ignore_domains = []
+    if ignore_list:
+        ignore_emails = ignore_list.emails
+        ignore_domains = ignore_list.domains
 
     # Build full text and character-to-token mapping
     full_text, char_to_token = _build_text_and_mapping(tokens)
@@ -321,7 +332,7 @@ def detect_pii(tokens: List[OcrToken], trusted_domains: List[str] = None) -> Lis
     all_items = []
 
     # Detect emails
-    all_items.extend(_detect_emails(full_text, char_to_token, tokens, trusted_domains))
+    all_items.extend(_detect_emails(full_text, char_to_token, tokens, ignore_emails, ignore_domains))
 
     # Detect IPs
     all_items.extend(_detect_ips(full_text, char_to_token, tokens))
@@ -330,7 +341,7 @@ def detect_pii(tokens: List[OcrToken], trusted_domains: List[str] = None) -> Lis
     all_items.extend(_detect_urls(full_text, char_to_token, tokens))
 
     # Detect domains (excluding emails, URLs, IPs)
-    all_items.extend(_detect_domains(full_text, char_to_token, tokens, all_items, trusted_domains))
+    all_items.extend(_detect_domains(full_text, char_to_token, tokens, all_items, ignore_domains))
 
     # Detect phone numbers
     all_items.extend(_detect_phones(full_text, char_to_token, tokens))
