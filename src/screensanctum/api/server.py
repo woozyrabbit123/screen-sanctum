@@ -1,6 +1,6 @@
 """FastAPI server for ScreenSanctum API."""
 
-from fastapi import FastAPI, Depends, Body
+from fastapi import FastAPI, Depends
 from celery.result import AsyncResult
 
 from screensanctum.workers.celery_app import celery_app
@@ -18,7 +18,7 @@ app = FastAPI(
 
 @app.post("/api/v1/jobs/redact", response_model=JobStatus)
 def submit_redaction_job(
-    request: RedactRequest = Body(..., embed=True),
+    request: RedactRequest,
     api_key: str = Depends(get_api_key)
 ):
     """Submit a redaction job for asynchronous processing.
