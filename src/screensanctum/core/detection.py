@@ -354,9 +354,11 @@ def detect_pii(tokens: List[OcrToken], ignore_list: Optional["TemplateIgnore"] =
             if not rule.name or not rule.regex:
                 continue  # Skip invalid rules
             try:
-                # This regex engine has built-in backtracking protection
-                # and will time out after 1 second.
-                for match in re.finditer(rule.regex, full_text, timeout=1, partial=True):
+                # 1. Compile the pattern first, WITH the timeout
+                pattern = re.compile(rule.regex, timeout=1)
+
+                # 2. Iterate over the compiled pattern
+                for match in pattern.finditer(full_text):
                     # Find tokens that contribute to this match
                     boxes = _tokens_for_match(match.start(), match.end(), char_to_token, tokens)
                     if not boxes:
