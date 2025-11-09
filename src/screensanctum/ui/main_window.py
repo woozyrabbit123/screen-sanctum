@@ -19,6 +19,7 @@ from screensanctum.ui.image_canvas import ImageCanvas
 from screensanctum.ui.sidebar import Sidebar
 from screensanctum.ui.utils import pil_to_qimage
 from screensanctum.core import image_loader, ocr, detection, regions, redaction, config
+from screensanctum.licensing import license_check, license_store
 
 
 class SettingsDialog(QDialog):
@@ -64,7 +65,7 @@ class MainWindow(QMainWindow):
         self.qimage: Optional[QImage] = None
         self.regions: list[regions.Region] = []
         self.config: config.AppConfig = config.load_config()
-        self.is_pro: bool = True  # Temporary flag for testing (will be licensing-based later)
+        self.license_data: Optional[license_check.LicenseData] = license_check.get_verified_license()
         self.current_image_path: Optional[str] = None
 
         # Create menu bar
@@ -75,6 +76,15 @@ class MainWindow(QMainWindow):
 
         # Connect signals
         self._connect_signals()
+
+    @property
+    def is_pro(self) -> bool:
+        """Check if user has a valid Pro license.
+
+        Returns:
+            True if license is valid and tier is "pro", False otherwise.
+        """
+        return self.license_data is not None and self.license_data.tier == "pro"
 
     def _create_menu_bar(self):
         """Create the application menu bar."""
@@ -103,6 +113,12 @@ class MainWindow(QMainWindow):
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
+
+        # Enter License action
+        enter_license_action = help_menu.addAction("&Enter License...")
+        enter_license_action.triggered.connect(self._on_enter_license)
+
+        help_menu.addSeparator()
 
         # About action
         about_action = help_menu.addAction("&About ScreenSanctum")
@@ -352,14 +368,90 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self.config, self)
         dialog.exec()
 
+    def _on_enter_license(self):
+        """Handle Help -> Enter License action."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select License File",
+            str(Path.home()),
+            "License Files (*.dat *.txt);;All Files (*)",
+        )
+
+        if not file_path:
+            return
+
+        try:
+            # Read license file
+            with open(file_path, 'rb') as f:
+                raw_license = f.read()
+
+            # Verify license
+            license_data = license_check.verify_license(raw_license)
+
+            if not license_data:
+                QMessageBox.critical(
+                    self,
+                    "Invalid License",
+                    "The selected license file is invalid or corrupted.\n\n"
+                    "Please check that you have the correct license file."
+                )
+                return
+
+            # Save license to storage location
+            if not license_store.save_license_file(raw_license):
+                QMessageBox.warning(
+                    self,
+                    "Save Error",
+                    "License verified successfully, but failed to save.\n\n"
+                    "You may need to import the license again next time."
+                )
+                return
+
+            # Update license data
+            self.license_data = license_data
+
+            # Show success
+            QMessageBox.information(
+                self,
+                "License Activated",
+                f"<h3>License Successfully Activated!</h3>"
+                f"<p><b>Licensed to:</b> {license_data.email}</p>"
+                f"<p><b>Tier:</b> {license_data.tier.upper()}</p>"
+                f"<p><b>License ID:</b> {license_data.license_id}</p>"
+                f"<p>Pro features are now enabled, including automatic PII detection.</p>"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error Reading License",
+                f"Failed to read license file:\n\n{str(e)}"
+            )
+
     def _on_about(self):
         """Handle Help -> About action."""
+        # Build license info section
+        if self.is_pro and self.license_data:
+            license_info = (
+                f"<p><b>Licensed to:</b> {self.license_data.email}</p>"
+                f"<p><b>Tier:</b> {self.license_data.tier.upper()}</p>"
+                f"<p><b>License ID:</b> {self.license_data.license_id}</p>"
+            )
+        else:
+            license_info = (
+                "<p><b>Running in Basic mode</b></p>"
+                "<p>Upgrade to <b>Pro</b> for automatic PII detection.</p>"
+                "<p><a href='https://screensanctum.example.com/purchase'>Purchase License</a></p>"
+            )
+
         QMessageBox.about(
             self,
             "About ScreenSanctum",
             "<h2>ScreenSanctum</h2>"
             "<p><b>Share your screen, not your secrets.</b></p>"
             "<p>Version 0.1.0</p>"
+            f"{license_info}"
+            "<hr>"
             "<p>An offline-first, cross-platform screenshot redaction tool.</p>"
             "<p>Automatically detects and redacts sensitive information including:</p>"
             "<ul>"

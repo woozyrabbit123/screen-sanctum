@@ -2,59 +2,74 @@
 
 from pathlib import Path
 from typing import Optional
-from cryptography.fernet import Fernet
-from screensanctum.core.config import get_app_dirs
+import platformdirs
 
 
-class LicenseStore:
-    """Manages storage and retrieval of license information."""
+def get_license_path() -> Path:
+    """Get the path to the license file.
 
-    def __init__(self):
-        """Initialize the license store."""
-        self.license_file = self._get_license_path()
-        self._cipher = None  # TODO: Initialize encryption
+    Returns:
+        Path to license.dat file.
+    """
+    data_dir = Path(platformdirs.user_data_dir("ScreenSanctum", ensure_exists=True))
+    return data_dir / "license.dat"
 
-    def _get_license_path(self) -> Path:
-        """Get the path to the license file.
 
-        Returns:
-            Path to the license file.
-        """
-        dirs = get_app_dirs()
-        return dirs["data_dir"] / "license.dat"
+def load_license_file() -> Optional[bytes]:
+    """Load the raw license file bytes.
 
-    def save_license(self, license_key: str) -> bool:
-        """Save a license key.
+    Returns:
+        Raw license bytes if file exists, None otherwise.
+    """
+    license_path = get_license_path()
 
-        Args:
-            license_key: The license key to save.
+    if not license_path.exists():
+        return None
 
-        Returns:
-            True if successful, False otherwise.
-        """
-        # TODO: Implement encrypted license storage using cryptography
-        pass
+    try:
+        with open(license_path, "rb") as f:
+            return f.read()
+    except Exception as e:
+        print(f"Error loading license file: {e}")
+        return None
 
-    def load_license(self) -> Optional[str]:
-        """Load the stored license key.
 
-        Returns:
-            The license key if found, None otherwise.
-        """
-        # TODO: Implement encrypted license loading
-        pass
+def save_license_file(raw_bytes: bytes) -> bool:
+    """Save raw license bytes to file.
 
-    def delete_license(self) -> bool:
-        """Delete the stored license.
+    Args:
+        raw_bytes: Raw license data to save.
 
-        Returns:
-            True if successful, False otherwise.
-        """
-        try:
-            if self.license_file.exists():
-                self.license_file.unlink()
-                return True
-            return False
-        except Exception as e:
-            print(f"Error deleting license: {e}")
-            return False
+    Returns:
+        True if successful, False otherwise.
+    """
+    license_path = get_license_path()
+
+    try:
+        # Ensure parent directory exists
+        license_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(license_path, "wb") as f:
+            f.write(raw_bytes)
+        return True
+    except Exception as e:
+        print(f"Error saving license file: {e}")
+        return False
+
+
+def delete_license_file() -> bool:
+    """Delete the stored license file.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    license_path = get_license_path()
+
+    try:
+        if license_path.exists():
+            license_path.unlink()
+            return True
+        return False
+    except Exception as e:
+        print(f"Error deleting license: {e}")
+        return False
