@@ -221,3 +221,11 @@ vendor/tesseract/
 build/
 dist/
 *.spec.bak
+
+# Release artifacts
+ScreenSanctum_v*.zip
+ScreenSanctum_v*.tar.gz
+
+# Build venvs
+venv_build/
+venv_*/
