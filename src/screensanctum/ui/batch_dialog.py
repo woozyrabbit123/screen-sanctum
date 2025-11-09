@@ -107,6 +107,11 @@ class BatchDialog(QDialog):
             self.recursive_checkbox.setChecked(True)
             layout.addWidget(self.recursive_checkbox)
 
+            # Audit log checkbox
+            self.audit_log_checkbox = QCheckBox("Create audit log (.json receipt)")
+            self.audit_log_checkbox.setChecked(self.config.enable_audit_logs)
+            layout.addWidget(self.audit_log_checkbox)
+
             # Start/Stop button
             button_layout = QHBoxLayout()
             self.start_button = QPushButton("Start Batch")
@@ -209,6 +214,7 @@ class BatchDialog(QDialog):
         self.output_button.setEnabled(False)
         self.template_selector.setEnabled(False)
         self.recursive_checkbox.setEnabled(False)
+        self.audit_log_checkbox.setEnabled(False)
 
         # Clear log
         self.log_text.clear()
@@ -231,9 +237,10 @@ class BatchDialog(QDialog):
 
         # Connect thread started signal to run_batch
         recursive = self.recursive_checkbox.isChecked()
+        create_audit_log = self.audit_log_checkbox.isChecked()
         self.batch_thread.started.connect(
             lambda: self.batch_processor.run_batch(
-                self.input_dir, self.output_dir, template, recursive
+                self.input_dir, self.output_dir, template, recursive, create_audit_log
             )
         )
 
@@ -276,14 +283,18 @@ class BatchDialog(QDialog):
         cursor.movePosition(cursor.MoveOperation.End)
         self.log_text.setTextCursor(cursor)
 
-    def _on_batch_finished(self, summary: str):
+    def _on_batch_finished(self, summary: str, audit_log_path: str = ""):
         """Handle batch finished signal.
 
         Args:
             summary: Summary message.
+            audit_log_path: Path to audit log file (if created).
         """
         self.log_text.append("")
         self.log_text.append(f"<b>{summary}</b>")
+
+        if audit_log_path:
+            self.log_text.append(f"Audit log saved to: {audit_log_path}")
 
         # Re-enable controls
         self.processing = False
@@ -293,6 +304,7 @@ class BatchDialog(QDialog):
         self.output_button.setEnabled(True)
         self.template_selector.setEnabled(True)
         self.recursive_checkbox.setEnabled(True)
+        self.audit_log_checkbox.setEnabled(True)
 
         # Clean up thread
         if self.batch_thread:

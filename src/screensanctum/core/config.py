@@ -70,6 +70,7 @@ class AppConfig:
     show_sidebar: bool = True
     theme: str = "system"  # "system", "light", or "dark"
     last_save_directory: str = ""
+    enable_audit_logs: bool = True
 
 
 def get_app_dirs() -> Dict[str, Path]:
@@ -217,6 +218,7 @@ def load_config() -> AppConfig:
             show_sidebar=data.get("show_sidebar", True),
             theme=data.get("theme", "system"),
             last_save_directory=data.get("last_save_directory", ""),
+            enable_audit_logs=data.get("enable_audit_logs", True),
         )
 
         # Ensure active_template_id is valid

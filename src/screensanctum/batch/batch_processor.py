@@ -8,6 +8,7 @@ from PIL import Image
 
 from screensanctum.core import image_loader, ocr, detection, regions, redaction
 from screensanctum.core.config import RedactionTemplate
+from screensanctum.batch.audit_logger import AuditLogger
 
 
 class BatchProcessor(QObject):
@@ -21,7 +22,7 @@ class BatchProcessor(QObject):
     # Signals
     progressUpdated = Signal(int, int)  # (current, total)
     fileProcessed = Signal(str, str)  # (filename, status)
-    batchFinished = Signal(str)  # (summary message)
+    batchFinished = Signal(str, str)  # (summary message, audit_log_path)
 
     # Supported image extensions
     SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp'}
@@ -65,7 +66,7 @@ class BatchProcessor(QObject):
 
         return sorted(images)
 
-    def run_batch(self, input_dir: str, output_dir: str, template: RedactionTemplate, recursive: bool = True):
+    def run_batch(self, input_dir: str, output_dir: str, template: RedactionTemplate, recursive: bool = True, create_audit_log: bool = True):
         """Run batch processing on all images in input_dir.
 
         This method is designed to be called from a worker thread.
@@ -75,8 +76,11 @@ class BatchProcessor(QObject):
             output_dir: Directory to save redacted images.
             template: RedactionTemplate to use for processing.
             recursive: If True, process subdirectories recursively.
+            create_audit_log: If True, create an audit log receipt.
         """
         self.should_stop = False
+        audit_logger: Optional[AuditLogger] = None
+        audit_log_path = ""
 
         try:
             # Find all images
@@ -84,12 +88,16 @@ class BatchProcessor(QObject):
             total_files = len(images)
 
             if total_files == 0:
-                self.batchFinished.emit("No images found in input directory.")
+                self.batchFinished.emit("No images found in input directory.", "")
                 return
 
             # Create output directory
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
+
+            # Create audit logger if requested
+            if create_audit_log:
+                audit_logger = AuditLogger(output_dir, template.id)
 
             input_path = Path(input_dir)
             success_count = 0
@@ -98,7 +106,10 @@ class BatchProcessor(QObject):
             # Process each image
             for idx, image_path in enumerate(images):
                 if self.should_stop:
-                    self.batchFinished.emit(f"Batch stopped by user. {success_count} files processed, {error_count} errors.")
+                    # Save audit log if it was created before stopping
+                    if audit_logger:
+                        audit_log_path = audit_logger.save_log()
+                    self.batchFinished.emit(f"Batch stopped by user. {success_count} files processed, {error_count} errors.", audit_log_path)
                     return
 
                 # Emit progress
@@ -143,6 +154,10 @@ class BatchProcessor(QObject):
 
                     redacted_image.save(str(output_file))
 
+                    # Log to audit logger if enabled
+                    if audit_logger:
+                        audit_logger.log_file(str(image_path), str(output_file), detected_regions)
+
                     # Emit success
                     self.fileProcessed.emit(str(relative_path), "Success")
                     success_count += 1
@@ -156,10 +171,14 @@ class BatchProcessor(QObject):
                     self.fileProcessed.emit(str(relative_path), f"Error: {str(e)}")
                     error_count += 1
 
+            # Save audit log if it was created
+            if audit_logger:
+                audit_log_path = audit_logger.save_log()
+
             # Emit completion summary
             summary = f"Batch complete. {success_count} files processed successfully, {error_count} errors."
-            self.batchFinished.emit(summary)
+            self.batchFinished.emit(summary, audit_log_path)
 
         except Exception as e:
             # Catch catastrophic errors
-            self.batchFinished.emit(f"Batch failed: {str(e)}")
+            self.batchFinished.emit(f"Batch failed: {str(e)}", "")

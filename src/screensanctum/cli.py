@@ -8,6 +8,7 @@ from pathlib import Path
 from screensanctum.core import image_loader, redaction, ocr, detection, regions, config
 from screensanctum.core.redaction import RedactionStyle
 from screensanctum.licensing import license_check
+from screensanctum.batch.audit_logger import AuditLogger
 
 
 @click.group()
@@ -147,7 +148,9 @@ def redact(input_path, output_path, style, auto, trusted_domains):
               help='Path to .sctmpl.json template file (not yet implemented).')
 @click.option('--recursive/--no-recursive', default=True,
               help='Process subdirectories recursively (default: True).')
-def batch(input_dir, output_dir, template_id, template_file, recursive):
+@click.option('--audit/--no-audit', default=True,
+              help='Create audit log (.json receipt) (default: True).')
+def batch(input_dir, output_dir, template_id, template_file, recursive, audit):
     """Batch process multiple images with a redaction template (Pro only).
 
     Examples:
@@ -215,6 +218,7 @@ def batch(input_dir, output_dir, template_id, template_file, recursive):
         click.echo(f"Input directory: {input_dir}")
         click.echo(f"Output directory: {output_dir}")
         click.echo(f"Recursive: {recursive}")
+        click.echo(f"Audit log: {'Enabled' if audit else 'Disabled'}")
         click.echo("")
 
         # Find all images
@@ -244,6 +248,12 @@ def batch(input_dir, output_dir, template_id, template_file, recursive):
         # Create output directory
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
+
+        # Create audit logger if enabled
+        audit_logger = None
+        audit_log_path = ""
+        if audit:
+            audit_logger = AuditLogger(output_dir, template.id)
 
         success_count = 0
         error_count = 0
@@ -287,11 +297,20 @@ def batch(input_dir, output_dir, template_id, template_file, recursive):
                         output_file = output_file.with_suffix('.png')
 
                     redacted_image.save(str(output_file))
+
+                    # Log to audit logger if enabled
+                    if audit_logger:
+                        audit_logger.log_file(str(image_path), str(output_file), detected_regions)
+
                     success_count += 1
 
                 except Exception as e:
                     click.echo(f"\n✗ {relative_path}: {str(e)}", err=True)
                     error_count += 1
+
+        # Save audit log if enabled
+        if audit_logger:
+            audit_log_path = audit_logger.save_log()
 
         # Print summary
         click.echo("")
@@ -301,6 +320,8 @@ def batch(input_dir, output_dir, template_id, template_file, recursive):
         if error_count > 0:
             click.echo(f"  ✗ Errors: {error_count} files")
         click.echo(f"  Output directory: {output_dir}")
+        if audit_log_path:
+            click.echo(f"  Audit log saved to: {audit_log_path}")
         click.echo("=" * 60)
 
     except Exception as e:
