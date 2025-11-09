@@ -38,7 +38,7 @@ def redact_image_task(image_b64: str, template_id: str) -> str:
 
     # 3. Re-use ALL our v2.0 core logic
     tokens = ocr.run_ocr(image, template.ocr_conf)
-    items = detection.detect_pii(tokens, template.ignore)
+    items = detection.detect_pii(tokens, template.ignore, template.custom_rules)
     region_list = regions.apply_template_policy(items, template)
     redacted_image = redaction.apply_redaction(image, region_list, template.style.default)
 

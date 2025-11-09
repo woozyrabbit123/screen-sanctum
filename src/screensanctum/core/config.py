@@ -9,6 +9,14 @@ from screensanctum.core.redaction import RedactionStyle
 
 
 @dataclass
+class CustomRule:
+    """A custom regex pattern for PII detection."""
+
+    name: str = "New Rule"
+    regex: str = "PATTERN_HERE"
+
+
+@dataclass
 class TemplateDetectors:
     """Configures which detectors are enabled for a template."""
 
@@ -58,6 +66,7 @@ class RedactionTemplate:
     export: TemplateExport = field(default_factory=TemplateExport)
     ocr_conf: int = 60
     url_flag_query_params: bool = True
+    custom_rules: List[CustomRule] = field(default_factory=list)
 
 
 @dataclass
@@ -164,6 +173,13 @@ def _deserialize_template(data: dict) -> RedactionTemplate:
     export_data = data.get("export", {})
     export = TemplateExport(**export_data)
 
+    # Deserialize custom rules
+    custom_rules = []
+    custom_rules_data = data.get("custom_rules", [])
+    for rule_data in custom_rules_data:
+        if isinstance(rule_data, dict):
+            custom_rules.append(CustomRule(**rule_data))
+
     return RedactionTemplate(
         id=data.get("id", "tpl_custom"),
         name=data.get("name", "Custom Template"),
@@ -173,7 +189,8 @@ def _deserialize_template(data: dict) -> RedactionTemplate:
         style=style,
         export=export,
         ocr_conf=data.get("ocr_conf", 60),
-        url_flag_query_params=data.get("url_flag_query_params", True)
+        url_flag_query_params=data.get("url_flag_query_params", True),
+        custom_rules=custom_rules
     )
 
 

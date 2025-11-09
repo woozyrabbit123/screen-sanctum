@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QListWidget,
     QComboBox,
     QToolBar,
+    QTableWidget,
+    QTableWidgetItem,
 )
 from PySide6.QtCore import Qt, QRect, QBuffer, QIODevice
 from PySide6.QtGui import QImage, QShortcut, QKeySequence, QGuiApplication
@@ -125,6 +127,36 @@ class TemplateManagerDialog(QDialog):
             style_layout.addStretch()
             right_layout.addLayout(style_layout)
 
+            # Custom Detection Rules section
+            right_layout.addWidget(QLabel("<b>Custom Detection Rules:</b>"))
+            self.custom_rules_table = QTableWidget()
+            self.custom_rules_table.setColumnCount(2)
+            self.custom_rules_table.setHorizontalHeaderLabels(["Rule Name", "Regex Pattern"])
+            self.custom_rules_table.horizontalHeader().setStretchLastSection(True)
+            self.custom_rules_table.setMaximumHeight(150)
+            self.custom_rules_table.cellChanged.connect(self._on_custom_rule_edited)
+            right_layout.addWidget(self.custom_rules_table)
+
+            # Custom rules buttons
+            custom_rules_buttons = QHBoxLayout()
+            self.add_rule_btn = QPushButton("Add Rule")
+            self.add_rule_btn.clicked.connect(self._on_add_custom_rule)
+            self.remove_rule_btn = QPushButton("Remove Rule")
+            self.remove_rule_btn.clicked.connect(self._on_remove_custom_rule)
+            custom_rules_buttons.addWidget(self.add_rule_btn)
+            custom_rules_buttons.addWidget(self.remove_rule_btn)
+            custom_rules_buttons.addStretch()
+            right_layout.addLayout(custom_rules_buttons)
+
+            # Pro-gate custom rules if not Pro
+            if not self.is_pro:
+                self.custom_rules_table.setEnabled(False)
+                self.add_rule_btn.setEnabled(False)
+                self.remove_rule_btn.setEnabled(False)
+                self.custom_rules_table.setToolTip("Pro feature - Upgrade to add custom detection rules")
+                self.add_rule_btn.setToolTip("Pro feature - Upgrade to add custom detection rules")
+                self.remove_rule_btn.setToolTip("Pro feature - Upgrade to add custom detection rules")
+
             # Save button for editor
             save_template_btn = QPushButton("Save Template")
             save_template_btn.clicked.connect(self._on_save_template)
@@ -174,6 +206,25 @@ class TemplateManagerDialog(QDialog):
                 self.style_combo.setCurrentIndex(i)
                 break
 
+        # Load custom rules into table
+        if self.is_pro:
+            self._load_custom_rules_to_table(template.custom_rules)
+
+    def _load_custom_rules_to_table(self, custom_rules):
+        """Load custom rules into the table widget."""
+        # Temporarily disconnect cellChanged to avoid triggering during population
+        self.custom_rules_table.cellChanged.disconnect(self._on_custom_rule_edited)
+
+        self.custom_rules_table.setRowCount(0)
+        for rule in custom_rules:
+            row = self.custom_rules_table.rowCount()
+            self.custom_rules_table.insertRow(row)
+            self.custom_rules_table.setItem(row, 0, QTableWidgetItem(rule.name))
+            self.custom_rules_table.setItem(row, 1, QTableWidgetItem(rule.regex))
+
+        # Reconnect cellChanged signal
+        self.custom_rules_table.cellChanged.connect(self._on_custom_rule_edited)
+
     def _on_save_template(self):
         """Save the current template from editor."""
         if not self.selected_template:
@@ -189,6 +240,19 @@ class TemplateManagerDialog(QDialog):
             line.strip() for line in self.ignored_domains_edit.toPlainText().split('\n') if line.strip()
         ]
         self.selected_template.style.default = self.style_combo.currentData()
+
+        # Update custom rules from table
+        if self.is_pro:
+            self.selected_template.custom_rules = []
+            for row in range(self.custom_rules_table.rowCount()):
+                name_item = self.custom_rules_table.item(row, 0)
+                regex_item = self.custom_rules_table.item(row, 1)
+                if name_item and regex_item:
+                    rule = config.CustomRule(
+                        name=name_item.text(),
+                        regex=regex_item.text()
+                    )
+                    self.selected_template.custom_rules.append(rule)
 
         # Save config
         if config.save_config(self.config):
@@ -249,6 +313,52 @@ class TemplateManagerDialog(QDialog):
             config.save_config(self.config)
             self._refresh_template_list()
             self.selected_template = None
+
+    def _on_add_custom_rule(self):
+        """Add a new custom rule to the table."""
+        if not self.selected_template:
+            QMessageBox.warning(self, "No Template Selected", "Please select a template first.")
+            return
+
+        # Add a new row to the table
+        row = self.custom_rules_table.rowCount()
+        self.custom_rules_table.insertRow(row)
+        self.custom_rules_table.setItem(row, 0, QTableWidgetItem("New Rule"))
+        self.custom_rules_table.setItem(row, 1, QTableWidgetItem("PATTERN_HERE"))
+
+        # Add to template's custom_rules list immediately
+        new_rule = config.CustomRule(name="New Rule", regex="PATTERN_HERE")
+        self.selected_template.custom_rules.append(new_rule)
+
+    def _on_remove_custom_rule(self):
+        """Remove the selected custom rule from the table."""
+        if not self.selected_template:
+            return
+
+        current_row = self.custom_rules_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "No Selection", "Please select a rule to remove.")
+            return
+
+        # Remove from table
+        self.custom_rules_table.removeRow(current_row)
+
+        # Remove from template's custom_rules list
+        if current_row < len(self.selected_template.custom_rules):
+            del self.selected_template.custom_rules[current_row]
+
+    def _on_custom_rule_edited(self, row, column):
+        """Handle cell edit in custom rules table."""
+        if not self.selected_template:
+            return
+
+        # Update the corresponding rule in the template
+        if row < len(self.selected_template.custom_rules):
+            name_item = self.custom_rules_table.item(row, 0)
+            regex_item = self.custom_rules_table.item(row, 1)
+            if name_item and regex_item:
+                self.selected_template.custom_rules[row].name = name_item.text()
+                self.selected_template.custom_rules[row].regex = regex_item.text()
 
 
 class MainWindow(QMainWindow):
@@ -620,7 +730,7 @@ class MainWindow(QMainWindow):
             tokens = ocr.run_ocr(self.image, conf_threshold=template.ocr_conf)
 
             # Run detection with template's ignore list
-            items = detection.detect_pii(tokens, template.ignore)
+            items = detection.detect_pii(tokens, template.ignore, template.custom_rules)
 
             # Apply template policy to build regions with proper selection
             self.regions = regions.apply_template_policy(items, template)

@@ -97,7 +97,7 @@ def redact(input_path, output_path, style, auto, trusted_domains):
                 template = next(t for t in app_config.templates if t.id == "tpl_01_default")
 
             ignore_policy = template.ignore
-            items = detection.detect_pii(tokens, ignore_policy)
+            items = detection.detect_pii(tokens, ignore_policy, template.custom_rules)
             click.echo(f"  - Found {len(items)} PII items")
 
             detected_regions = regions.build_regions(items)
@@ -292,7 +292,7 @@ def batch(input_dir, output_dir, template_id, template_file, recursive, audit):
                     tokens = ocr.run_ocr(image, conf_threshold=template.ocr_conf)
 
                     # Run detection with template's ignore list
-                    items = detection.detect_pii(tokens, template.ignore)
+                    items = detection.detect_pii(tokens, template.ignore, template.custom_rules)
 
                     # Apply template policy to build regions
                     detected_regions = regions.apply_template_policy(items, template)
