@@ -1,9 +1,22 @@
 """Configuration management for ScreenSanctum."""
 
 import json
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict
 import platformdirs
+
+
+@dataclass
+class AppConfig:
+    """Application configuration settings."""
+
+    redaction_style: str = "blur"  # "blur", "solid", or "pixelate"
+    auto_detect_on_open: bool = True
+    ocr_confidence_threshold: int = 60
+    show_sidebar: bool = True
+    theme: str = "system"  # "system", "light", or "dark"
+    last_save_directory: str = ""
 
 
 def get_app_dirs() -> Dict[str, Path]:
@@ -35,46 +48,43 @@ def get_config_path() -> Path:
     return dirs["config_dir"] / "config.json"
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> AppConfig:
     """Load configuration from config file.
 
     Returns:
-        Dictionary containing configuration settings.
-        Returns default config if file doesn't exist.
+        AppConfig object with settings.
+        Returns default config if file doesn't exist or is invalid.
     """
     config_path = get_config_path()
 
     if not config_path.exists():
         # Return default configuration
-        return {
-            "app_version": "0.1.0",
-            "detection": {
-                "enabled": True,
-                "auto_detect_on_load": True,
-            },
-            "redaction": {
-                "color": "#000000",
-                "opacity": 1.0,
-            },
-            "ui": {
-                "theme": "system",
-                "show_sidebar": True,
-            },
-        }
+        return AppConfig()
 
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
+            data = json.load(f)
+
+        # Create AppConfig from loaded data, using defaults for missing fields
+        return AppConfig(
+            redaction_style=data.get("redaction_style", "blur"),
+            auto_detect_on_open=data.get("auto_detect_on_open", True),
+            ocr_confidence_threshold=data.get("ocr_confidence_threshold", 60),
+            show_sidebar=data.get("show_sidebar", True),
+            theme=data.get("theme", "system"),
+            last_save_directory=data.get("last_save_directory", ""),
+        )
+    except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
         print(f"Error loading config: {e}")
-        return {}
+        # Return default config on error
+        return AppConfig()
 
 
-def save_config(config: Dict[str, Any]) -> bool:
+def save_config(config: AppConfig) -> bool:
     """Save configuration to config file.
 
     Args:
-        config: Dictionary containing configuration settings.
+        config: AppConfig object containing settings.
 
     Returns:
         True if successful, False otherwise.
@@ -82,8 +92,11 @@ def save_config(config: Dict[str, Any]) -> bool:
     config_path = get_config_path()
 
     try:
+        # Convert dataclass to dict
+        config_dict = asdict(config)
+
         with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+            json.dump(config_dict, f, indent=2)
         return True
     except (IOError, TypeError) as e:
         print(f"Error saving config: {e}")
