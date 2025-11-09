@@ -1,0 +1,29 @@
+{
+  "id": "tpl_04_docs_email",
+  "name": "Docs & Email",
+  "version": 1,
+  "description": "Professional redaction for documentation and email attachments. Hides sensitive contact information while preserving technical details.",
+  "detectors": {
+    "email": true,
+    "phone": true,
+    "ipv4": true,
+    "hostname": true,
+    "url": false,
+    "face": false
+  },
+  "ignore": {
+    "emails": [],
+    "domains": []
+  },
+  "style": {
+    "default": "SOLID"
+  },
+  "export": {
+    "format": "png",
+    "flatten": true,
+    "strip_metadata": true,
+    "filename_pattern": "{name}_docs.png"
+  },
+  "ocr_conf": 65,
+  "url_flag_query_params": false
+}
