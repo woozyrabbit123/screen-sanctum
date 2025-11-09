@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "screensanctum"
+version = "0.1.0"
+description = "Share your screen, not your secrets - Offline screenshot redaction tool"
+authors = [
+    {name = "ScreenSanctum Team"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+keywords = ["screenshot", "redaction", "privacy", "ocr", "offline"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
+]
+
+dependencies = [
+    "PySide6>=6.5.0",
+    "pillow>=10.0.0",
+    "pytesseract>=0.3.10",
+    "opencv-python-headless>=4.8.0",
+    "platformdirs>=3.10.0",
+    "phonenumbers>=8.13.0",
+    "cryptography>=41.0.0",
+    "click>=8.1.0",
+]
+
+[project.scripts]
+screensanctum = "screensanctum.app:main"
+
+[project.urls]
+Homepage = "https://github.com/woozyrabbit123/screen-sanctum"
+Repository = "https://github.com/woozyrabbit123/screen-sanctum"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

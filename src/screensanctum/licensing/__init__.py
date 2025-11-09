@@ -1,0 +1,1 @@
+"""Licensing and validation functionality."""
