@@ -71,6 +71,7 @@ class AppConfig:
     theme: str = "system"  # "system", "light", or "dark"
     last_save_directory: str = ""
     enable_audit_logs: bool = True
+    api_keys: List[str] = field(default_factory=list)
 
 
 def get_app_dirs() -> Dict[str, Path]:
@@ -219,6 +220,7 @@ def load_config() -> AppConfig:
             theme=data.get("theme", "system"),
             last_save_directory=data.get("last_save_directory", ""),
             enable_audit_logs=data.get("enable_audit_logs", True),
+            api_keys=data.get("api_keys", []),
         )
 
         # Ensure active_template_id is valid
