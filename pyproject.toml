@@ -43,6 +43,7 @@ dev = [
 
 [project.scripts]
 screensanctum = "screensanctum.app:main"
+screensanctum-cli = "screensanctum.cli:cli"
 
 [project.urls]
 Homepage = "https://github.com/woozyrabbit123/screen-sanctum"
