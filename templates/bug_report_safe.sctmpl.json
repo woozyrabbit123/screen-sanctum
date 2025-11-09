@@ -1,0 +1,29 @@
+{
+  "id": "tpl_03_bug_report",
+  "name": "Bug Report Safe",
+  "version": 1,
+  "description": "Balanced redaction for bug reports and support tickets. Preserves technical details like URLs while hiding personal information.",
+  "detectors": {
+    "email": true,
+    "phone": true,
+    "ipv4": true,
+    "hostname": false,
+    "url": false,
+    "face": false
+  },
+  "ignore": {
+    "emails": [],
+    "domains": []
+  },
+  "style": {
+    "default": "BLUR"
+  },
+  "export": {
+    "format": "png",
+    "flatten": true,
+    "strip_metadata": true,
+    "filename_pattern": "{name}_bug_report.png"
+  },
+  "ocr_conf": 60,
+  "url_flag_query_params": false
+}

@@ -1,0 +1,29 @@
+{
+  "id": "tpl_02_social_share",
+  "name": "Social Share Safe",
+  "version": 1,
+  "description": "Aggressive PII detection for social media sharing. Redacts all personal information to prevent doxxing.",
+  "detectors": {
+    "email": true,
+    "phone": true,
+    "ipv4": true,
+    "hostname": true,
+    "url": true,
+    "face": false
+  },
+  "ignore": {
+    "emails": [],
+    "domains": []
+  },
+  "style": {
+    "default": "SOLID"
+  },
+  "export": {
+    "format": "png",
+    "flatten": true,
+    "strip_metadata": true,
+    "filename_pattern": "{name}_social_safe.png"
+  },
+  "ocr_conf": 70,
+  "url_flag_query_params": true
+}
