@@ -20,3 +20,6 @@ celery_app.conf.update(
 
 # Auto-discover tasks from the tasks module
 celery_app.autodiscover_tasks(["screensanctum.workers"])
+
+# Alias for Celery CLI compatibility
+app = celery_app

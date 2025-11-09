@@ -89,8 +89,15 @@ def redact(input_path, output_path, style, auto, trusted_domains):
             click.echo(f"  - Extracted {len(tokens)} text tokens")
 
             click.echo("  - Detecting sensitive information...")
-            trusted_list = list(trusted_domains) if trusted_domains else []
-            items = detection.detect_pii(tokens, trusted_list)
+            # Load template for ignore policy
+            app_config = config.load_config()
+            try:
+                template = next(t for t in app_config.templates if t.id == app_config.active_template_id)
+            except StopIteration:
+                template = next(t for t in app_config.templates if t.id == "tpl_01_default")
+
+            ignore_policy = template.ignore
+            items = detection.detect_pii(tokens, ignore_policy)
             click.echo(f"  - Found {len(items)} PII items")
 
             detected_regions = regions.build_regions(items)
