@@ -10,6 +10,11 @@ from screensanctum.core.redaction import RedactionStyle
 from screensanctum.licensing import license_check
 from screensanctum.batch.audit_logger import AuditLogger
 
+try:
+    import uvicorn
+except ImportError:
+    uvicorn = None
+
 
 @click.group()
 @click.version_option(version="0.1.0", prog_name="ScreenSanctum CLI")
@@ -327,6 +332,59 @@ def batch(input_dir, output_dir, template_id, template_file, recursive, audit):
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command()
+@click.option('--port', default=8000, type=int, help='Port to run the server on (default: 8000).')
+@click.option('--host', default="0.0.0.0", help='Host to bind to (default: 0.0.0.0).')
+def server(port, host):
+    """Start the ScreenSanctum API server (Enterprise feature).
+
+    The API server provides a REST API for integrating ScreenSanctum into
+    enterprise workflows and automation pipelines.
+
+    Prerequisites:
+    - Redis server must be running (redis-server)
+    - Celery worker must be running:
+      celery -A screensanctum.workers.celery_app worker --loglevel=info
+
+    Examples:
+
+        # Start server on default port 8000:
+        screensanctum-cli server
+
+        # Start server on custom port:
+        screensanctum-cli server --port 8080
+
+        # Visit API docs at http://localhost:8000/docs
+    """
+    if uvicorn is None:
+        click.echo("Error: API server dependencies not installed.", err=True)
+        click.echo("", err=True)
+        click.echo("To use the API server, install the 'api' dependencies:", err=True)
+        click.echo("  pip install -e \".[api]\"", err=True)
+        sys.exit(1)
+
+    click.echo("=" * 60)
+    click.echo("ScreenSanctum API Server v3.0")
+    click.echo("=" * 60)
+    click.echo(f"Starting server at http://{host}:{port}")
+    click.echo(f"API documentation: http://{host}:{port}/docs")
+    click.echo("")
+    click.echo("Prerequisites:")
+    click.echo("  ✓ Redis: Ensure 'redis-server' is running")
+    click.echo("  ✓ Celery: Start with 'celery -A screensanctum.workers.celery_app worker --loglevel=info'")
+    click.echo("")
+    click.echo("Press Ctrl+C to stop the server")
+    click.echo("=" * 60)
+    click.echo("")
+
+    uvicorn.run(
+        "screensanctum.api.server:app",
+        host=host,
+        port=port,
+        reload=True
+    )
 
 
 if __name__ == "__main__":
