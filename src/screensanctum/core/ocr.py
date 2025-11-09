@@ -142,11 +142,14 @@ def run_ocr(image: Image.Image, conf_threshold: int = 60) -> List[OcrToken]:
         os.environ['TESSDATA_PREFIX'] = tessdata_prefix
 
     # Downsample large images to prevent memory issues
-    if image.width > MAX_OCR_DIMENSION or image.height > MAX_OCR_DIMENSION:
-        image.thumbnail((MAX_OCR_DIMENSION, MAX_OCR_DIMENSION), Image.Resampling.LANCZOS)
+    # Create a copy for OCR
+    image_copy = image.copy()
 
-    # Convert PIL Image to NumPy array
-    img_array = to_ocr_array(image)
+    if image_copy.width > MAX_OCR_DIMENSION or image_copy.height > MAX_OCR_DIMENSION:
+        image_copy.thumbnail((MAX_OCR_DIMENSION, MAX_OCR_DIMENSION), Image.Resampling.LANCZOS)
+
+    # Run OCR on the copy, not the original
+    img_array = to_ocr_array(image_copy)
 
     # Preprocess image for better OCR results
     # Convert to grayscale
