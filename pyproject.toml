@@ -35,6 +35,12 @@ dependencies = [
     "click>=8.1.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-qt>=4.2.0",
+]
+
 [project.scripts]
 screensanctum = "screensanctum.app:main"
 
