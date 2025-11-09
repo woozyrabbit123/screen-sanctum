@@ -3,7 +3,7 @@
 from typing import Optional, List
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, Signal, QRect, QPoint, QSize
-from PySide6.QtGui import QPainter, QImage, QColor, QPen
+from PySide6.QtGui import QPainter, QImage, QColor, QPen, QPixmap
 from screensanctum.core.regions import Region
 
 
@@ -23,6 +23,7 @@ class ImageCanvas(QWidget):
 
         # Image and regions state
         self.qimage: Optional[QImage] = None
+        self.cached_pixmap: QPixmap | None = None
         self.regions: List[Region] = []
 
         # HiDPI/Retina coordinate tracking
@@ -54,8 +55,10 @@ class ImageCanvas(QWidget):
         self.qimage = qimage
         if qimage:
             self.source_image_size = qimage.size()
+            self.cached_pixmap = QPixmap.fromImage(qimage)
         else:
             self.source_image_size = None
+            self.cached_pixmap = None
         self.update()  # Trigger repaint
 
     def set_regions(self, regions: List[Region]):
@@ -138,9 +141,9 @@ class ImageCanvas(QWidget):
             y_offset = (widget_rect.height() - target_height) // 2
             self.display_offset = QPoint(x_offset, y_offset)
 
-            # Draw the image
+            # Draw the image using cached pixmap for better performance
             target_rect = QRect(x_offset, y_offset, target_width, target_height)
-            painter.drawImage(target_rect, self.qimage)
+            painter.drawPixmap(target_rect, self.cached_pixmap)
 
             # Draw regions using mapped coordinates
             self._draw_regions(painter)
@@ -210,7 +213,15 @@ class ImageCanvas(QWidget):
         """
         if self.drawing:
             self.draw_current = event.pos()
-            self.update()
+
+            # Only update the area we are drawing on (dirty rectangle optimization)
+            if self.draw_start and self.draw_current:
+                # Get the rectangle we are drawing
+                rubber_band_rect = QRect(self.draw_start, self.draw_current).normalized()
+                # Redraw *just* that rectangle (with a little padding)
+                self.update(rubber_band_rect.adjusted(-5, -5, 5, 5))
+            else:
+                self.update()  # Fallback to full update
 
     def mouseReleaseEvent(self, event):
         """Handle mouse release for completing manual region.

@@ -10,6 +10,9 @@ import pytesseract
 from PIL import Image
 from screensanctum.core.image_loader import to_ocr_array
 
+# Maximum dimension for OCR processing to prevent memory issues with large images
+MAX_OCR_DIMENSION = 3000
+
 
 @dataclass
 class OcrToken:
@@ -137,6 +140,10 @@ def run_ocr(image: Image.Image, conf_threshold: int = 60) -> List[OcrToken]:
     # Set tessdata path if specified
     if tessdata_prefix:
         os.environ['TESSDATA_PREFIX'] = tessdata_prefix
+
+    # Downsample large images to prevent memory issues
+    if image.width > MAX_OCR_DIMENSION or image.height > MAX_OCR_DIMENSION:
+        image.thumbnail((MAX_OCR_DIMENSION, MAX_OCR_DIMENSION), Image.Resampling.LANCZOS)
 
     # Convert PIL Image to NumPy array
     img_array = to_ocr_array(image)
