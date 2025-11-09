@@ -26,12 +26,10 @@ from screensanctum.core.config import (
 )
 from screensanctum.core.redaction import RedactionStyle
 
-# Define database path using platformdirs
-_config_dir = Path(platformdirs.user_config_dir("ScreenSanctum"))
-_config_dir.mkdir(parents=True, exist_ok=True)
-DATABASE_PATH = _config_dir / "config.sqlite"
-
-# Thread lock for all database operations
+# Define all paths as module-level constants (centralized path logic)
+CONFIG_DIR = platformdirs.user_config_dir("ScreenSanctum", ensure_exists=True)
+DATABASE_PATH = os.path.join(CONFIG_DIR, "config.sqlite")
+LEGACY_JSON_PATH = os.path.join(CONFIG_DIR, "config.json")
 db_lock = threading.Lock()
 
 
@@ -125,13 +123,8 @@ def init_db() -> None:
     or no legacy file exists, creates a default config. This is safe to call
     multiple times.
     """
-    # 1. Define paths
-    config_dir = platformdirs.user_config_dir("ScreenSanctum", ensure_exists=True)
-    db_path = os.path.join(config_dir, "config.sqlite")
-    legacy_json_path = os.path.join(config_dir, "config.json")
-
     with db_lock:
-        db = sqlite3.connect(db_path)
+        db = sqlite3.connect(DATABASE_PATH)
         db.execute("CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY, config_json TEXT)")
 
         # 2. Check if DB is empty
@@ -140,16 +133,16 @@ def init_db() -> None:
 
         if existing_config is None:
             # DB is new. Check for a legacy JSON file to migrate.
-            if os.path.exists(legacy_json_path):
+            if os.path.exists(LEGACY_JSON_PATH):
                 try:
-                    with open(legacy_json_path, 'r') as f:
+                    with open(LEGACY_JSON_PATH, 'r') as f:
                         legacy_json_data = f.read()
                     # We just insert the raw JSON data.
                     # Deserialization and validation happens in load_config()
                     db.execute("INSERT INTO config (id, config_json) VALUES (1, ?)", (legacy_json_data,))
                     db.commit()
                     # Delete the old file *after* successful migration
-                    os.remove(legacy_json_path)
+                    os.remove(LEGACY_JSON_PATH)
                 except Exception as e:
                     # If migration fails, create a default config
                     default_config = AppConfig()
