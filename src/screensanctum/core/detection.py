@@ -239,6 +239,7 @@ def _detect_phones(full_text: str, char_to_token: List[Optional[int]],
         List of DetectedItem objects for phone numbers.
     """
     items = []
+    seen = set()  # Track (text, start, end) to avoid duplicates from different regions
 
     # Try multiple regions for better detection
     # None means "generic" region
@@ -249,15 +250,19 @@ def _detect_phones(full_text: str, char_to_token: List[Optional[int]],
                 start = match.start
                 end = match.end
 
+                # Check if we've already seen this exact match (same text at same position)
+                key = (phone_text, start, end)
+                if key in seen:
+                    continue
+                seen.add(key)
+
                 boxes = _tokens_for_match(start, end, char_to_token, tokens)
                 if boxes:
-                    # Avoid duplicates
-                    if not any(item.text == phone_text for item in items):
-                        items.append(DetectedItem(
-                            pii_type=PiiType.PHONE,
-                            text=phone_text,
-                            boxes=boxes
-                        ))
+                    items.append(DetectedItem(
+                        pii_type=PiiType.PHONE,
+                        text=phone_text,
+                        boxes=boxes
+                    ))
         except Exception:
             # phonenumbers can raise exceptions for certain inputs
             continue
